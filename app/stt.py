@@ -56,8 +56,12 @@ def status() -> dict:
     }
 
 
-def transcribe(audio: np.ndarray, language: str | None = None) -> str:
-    """Transcribe mono float32 audio in [-1, 1] sampled at 16 kHz."""
+def transcribe(audio: np.ndarray, language: str | None = None, fast: bool = False) -> str:
+    """Transcribe mono float32 audio in [-1, 1] sampled at 16 kHz.
+
+    ``fast=True`` is used for live partial captions (lower latency); the final
+    transcript uses a wider beam search for better accuracy.
+    """
     if audio is None or len(audio) < config.SAMPLE_RATE * 0.2:
         return ""
 
@@ -69,13 +73,15 @@ def transcribe(audio: np.ndarray, language: str | None = None) -> str:
     prompt = None
     if lang == "zh":
         # Bias towards Simplified Chinese with punctuation.
-        prompt = "以下是普通话的句子，请使用简体中文输出，并添加标点符号。"
+        # Short, content-neutral prompt. Longer instruction prompts bias the
+        # model's word choice (e.g. "实时" -> "时时") and hurt accuracy.
+        prompt = "这是一段普通话的录音。"
 
     with _infer_lock:
         segments, _info = _model.transcribe(
             audio,
             language=lang,
-            beam_size=1,
+            beam_size=1 if fast else 5,
             best_of=1,
             temperature=0.0,
             vad_filter=False,

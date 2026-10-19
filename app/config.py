@@ -9,8 +9,20 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent.parent
 WEB_DIR = ROOT_DIR / "web"
 
+def _default_model() -> str:
+    """Use a locally downloaded model directory when one is present.
+
+    This avoids re-downloading from Hugging Face (which can stall on some
+    networks) after ``models/faster-whisper-small`` has been fetched manually.
+    """
+    local = ROOT_DIR / "models" / "faster-whisper-small"
+    if (local / "model.bin").is_file():
+        return str(local)
+    return "small"
+
+
 # Speech recognition
-MODEL_NAME = os.getenv("ECHONOTE_MODEL", "small")
+MODEL_NAME = os.getenv("ECHONOTE_MODEL") or _default_model()
 MODEL_DIR = os.getenv("ECHONOTE_MODEL_DIR", str(ROOT_DIR / "models"))
 LANGUAGE = os.getenv("ECHONOTE_LANGUAGE", "zh")
 

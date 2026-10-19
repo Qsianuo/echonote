@@ -135,11 +135,12 @@ class StreamingSession:
             if (
                 now - partial_clock >= config.PARTIAL_INTERVAL_S
                 and segmenter.in_speech
+                and self._audio.empty()  # don't fall behind: finish the backlog first
             ):
                 partial_clock = now
                 audio = segmenter.current_audio()
                 if audio is not None:
-                    text = stt.transcribe(audio, self.language)
+                    text = stt.transcribe(audio, self.language, fast=True)
                     if text and text != self._last_partial:
                         self._last_partial = text
                         self._emit({"type": "partial", "text": text})

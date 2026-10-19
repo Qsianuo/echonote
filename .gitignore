@@ -1,0 +1,24 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Whisper models (downloaded on first run)
+models/
+
+# Runtime data / recordings / test output
+data/
+tests/exports/
+*.wav
+*.webm
+*.mp3
+*.m4a
+
+# Local config
+.env
+
+# OS
+.DS_Store
+Thumbs.db

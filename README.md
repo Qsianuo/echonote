@@ -236,6 +236,13 @@ echonote/
 
 ---
 
+## 📝 相关文章
+
+- 中文：[我用 faster-whisper 做了一个本地实时语音转文字工具](docs/articles/juejin.md)
+- English：[Building an Open-Source Local Recorder with Real-Time Speech-to-Text](docs/articles/devto.md)
+
+---
+
 ## 📄 License
 
 [MIT](LICENSE) © 2026 Qsianuo

@@ -31,6 +31,29 @@ def run_self_test(exe: Path) -> None:
         raise SystemExit("self-test failed")
 
 
+def run_fetch_model_guard(exe: Path) -> None:
+    """The offline preparation command must exist *and* refuse bad input.
+
+    An unknown key proves the code path is bundled (``app.fetch`` is imported
+    lazily, so a missing hidden import would surface here) without touching
+    the network.
+    """
+    result = subprocess.run(
+        [str(exe), "--fetch-model", "__does_not_exist__"],
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    out = (result.stdout or "") + (result.stderr or "")
+    if result.returncode != 2:
+        print(out[-1500:], file=sys.stderr)
+        raise SystemExit(f"fetch-model did not reject an unknown key (exit {result.returncode})")
+    if "未知模型" not in out:
+        print(out[-1500:], file=sys.stderr)
+        raise SystemExit("fetch-model output is missing the expected message")
+    print("fetch-model: bundled, rejects unknown keys, no download attempted")
+
+
 def wait_http(path: str, timeout: float) -> str:
     deadline = time.monotonic() + timeout
     last = None
@@ -50,7 +73,7 @@ def run_server(exe: Path) -> None:
         {
             "ECHONOTE_PORT": PORT,
             "ECHONOTE_NO_BROWSER": "1",
-            "ECHONOTE_SKIP_PRELOAD": "1",  # no 464 MB download in CI
+            "ECHONOTE_SKIP_PRELOAD": "1",  # never download a model in CI
         }
     )
     proc = subprocess.Popen([str(exe)], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -62,6 +85,11 @@ def run_server(exe: Path) -> None:
         config = json.loads(wait_http("/api/config", 30))
         assert config.get("protocol") == "2", config
         print("config:", {k: config[k] for k in ("version", "protocol", "max_sessions")})
+        assert "offline_ready" in config, config
+
+        models_payload = json.loads(wait_http("/api/models", 30))
+        assert models_payload.get("items"), models_payload
+        print("models:", models_payload.get("current"), len(models_payload["items"]), "entries")
 
         page = wait_http("/", 30)
         assert "<html" in page.lower(), "static index.html not served"
@@ -83,6 +111,8 @@ def main() -> None:
         raise SystemExit(f"not found: {exe}")
     print(f"== self-test {exe.name} ==")
     run_self_test(exe)
+    print(f"== fetch-model {exe.name} ==")
+    run_fetch_model_guard(exe)
     print(f"== server {exe.name} ==")
     run_server(exe)
     print("SMOKE TEST PASS")

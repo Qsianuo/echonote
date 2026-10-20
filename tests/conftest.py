@@ -15,6 +15,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 os.environ.setdefault("ECHONOTE_SKIP_PRELOAD", "1")
+# Point model lookup at a path that does not exist so the suite behaves the
+# same on a developer machine (which has real weights) and in CI (which does
+# not). Tests that need a model build a fake folder under tmp_path.
+os.environ.setdefault("ECHONOTE_MODEL_DIR", str(ROOT / "tests" / "_absent_models"))
 
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402

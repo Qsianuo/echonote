@@ -24,7 +24,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from . import config, protocol, stt
+from . import config, models, protocol, stt
 from .vad import Segmenter
 
 logging.basicConfig(
@@ -147,13 +147,54 @@ def retry_model() -> dict:
     return stt.retry()
 
 
+@app.get("/api/models")
+def list_models() -> dict:
+    """Which models exist on this machine, and which one is loaded.
+
+    The UI only offers installed entries: switching must never become an
+    accidental download.
+    """
+    target = config.model_target()
+    installed = {spec.key for spec in models.available(config.MODEL_DIR)}
+    return {
+        "current": target.key,
+        "current_path": target.path,
+        "offline_ready": target.path is not None,
+        "items": [
+            {
+                "key": spec.key,
+                "label": spec.label,
+                "size_mb": spec.size_mb,
+                "tier": spec.tier,
+                "note": spec.note,
+                "installed": spec.key in installed,
+            }
+            for spec in models.CATALOG
+        ],
+    }
+
+
+@app.post("/api/model")
+def switch_model(payload: dict) -> dict:
+    key = str((payload or {}).get("key") or "").strip()
+    if not key:
+        return JSONResponse({"ok": False, "error": "缺少 key"}, status_code=400)
+    result = stt.switch(key)
+    return JSONResponse(result, status_code=200 if result.get("ok") else 400)
+
+
 @app.get("/api/config")
 def get_config() -> dict:
+    target = config.model_target()
     return {
         "version": config.APP_VERSION,
         "stage": config.APP_STAGE,
         "protocol": protocol.PROTOCOL_VERSION,
-        "model": config.MODEL_NAME,
+        "model": target.loader_value,
+        "model_label": target.label,
+        "model_key": target.key,
+        "offline_ready": target.path is not None,
+        "offline_mode": config.offline_mode(),
         "sample_rate": config.SAMPLE_RATE,
         "language": config.LANGUAGE,
         "languages": LANGUAGES,

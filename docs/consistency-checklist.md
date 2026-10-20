@@ -25,8 +25,8 @@ grep -rn "3\.9+" README.md start.bat run.sh app/     # 必须为空
 | 4 | 导出数量口径 | `grep -rn "三种文本导出" README.md` | 空 | ✅ 空（四种导出：TXT/MD/SRT/WAV） |
 | 5 | 产品版本号与阶段一致 | `grep -rn "version=" app/main.py` | `config.APP_VERSION` | ✅ `version=config.APP_VERSION` → `0.9.0` |
 | 6 | 前端不以 health 做门控 | `grep -rn "api/health" web/` | 空 | ✅ 空（只用 `/api/ready`） |
-| 7 | VAD 取整已披露 | `grep -n "630 ms" README.md` | 命中 | ✅ README 配置表：650 → 实际 630 ms |
-| 8 | 最短语音已披露 | `grep -n "270 ms" README.md` | 命中 | ✅ README 配置表：280 → 实际 270 ms |
+| 7 | VAD 取整已披露 | `grep -n "900 ms" README.md` | 命中 | ✅ README 配置表：900 → 实际 900 ms |
+| 8 | 最短语音已披露 | `grep -n "240 ms" README.md` | 命中 | ✅ README 配置表：240 → 实际 240 ms |
 | 9 | 灵敏度方向无歧义 | `grep -n "越不灵敏" README.md` | 命中 | ✅ “数值越大越不灵敏（更难触发）” |
 | 10 | 新增配置已文档化 | `grep -n "ECHONOTE_MAX_RECORD_MINUTES\|ECHONOTE_ALLOW_NONLOCAL" README.md` | 各命中 | ✅ 均在配置表 |
 | 11 | 探针语义已写明 | `grep -n "仅表示进程存活" README.md` | 命中 | ✅ `/api/health` 行 |
@@ -43,7 +43,7 @@ grep -rn "3\.9+" README.md start.bat run.sh app/     # 必须为空
 | 并发上限 | `app/config.py` `MAX_CONCURRENT_SESSIONS` | 2 |
 | 软上限 | `app/config.py` `MAX_RECORD_MINUTES` | 90（0=不限） |
 | 内存预算 | `app/config.py` `RECORDING_MEMORY_BUDGET_BYTES` | 200 MiB |
-| VAD 帧数 | `app/vad.py` | hangover 21 帧 = 630 ms；min_speech 9 帧 = 270 ms |
+| VAD 帧数 | `app/vad.py` | hangover 30 帧 = 900 ms；min_speech 8 帧 = 240 ms |
 
 ## 3. 已知不一致 / 待补
 

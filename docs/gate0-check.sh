@@ -37,15 +37,18 @@ expect_empty "3  no 40-90ms worklet chunk claim" "40–90 ms\|40-90 ms"   README
 expect_empty "4  no 'three text exports'"        "三种文本导出"          README.md
 expect_empty "6  frontend never gates on health" "api/health"           web/
 expect_empty "12 no innerHTML rendering"         "innerHTML"            web/
+expect_empty "14 no download in the request path" "snapshot_download"   app/main.py app/stt.py app/desktop.py
 
 expect_hit "5  version comes from config"        "version=config.APP_VERSION" app/main.py
-expect_hit "7  hangover rounding disclosed"      "630 ms"               README.md
-expect_hit "8  min-speech rounding disclosed"    "270 ms"               README.md
+expect_hit "7  hangover rounding disclosed"      "900 ms"               README.md
+expect_hit "8  min-speech rounding disclosed"    "240 ms"               README.md
 expect_hit "9  sensitivity direction is explicit" "越不灵敏"             README.md
 expect_hit "10 max record minutes documented"    "ECHONOTE_MAX_RECORD_MINUTES" README.md
 expect_hit "10 non-local opt-in documented"      "ECHONOTE_ALLOW_NONLOCAL"     README.md
 expect_hit "11 liveness probe semantics stated"  "仅表示进程存活"        README.md
 expect_hit "13 protocol v2 documented"           '"protocol":"2"'       README.md
+expect_hit "15 offline mode documented"          "ECHONOTE_OFFLINE"     README.md
+expect_hit "16 model switch documented"          "识别模型"              README.md
 
 if [ "$fail" -eq 0 ]; then
   echo "----"

@@ -15,29 +15,19 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from app import models  # noqa: E402
 
 
 def model_cached(model: str, model_dir: Path) -> bool:
-    """True when ``model`` is already on disk (local dir or HF cache)."""
-    direct = Path(model)
-    if direct.is_dir() and (direct / "model.bin").is_file():
-        return True
-    if direct.is_file():
-        return True
-    if model.startswith(("/", "./", ".\\")) or ":" in model[:3]:
-        return False
+    """True when the resolved model is already on disk.
 
-    candidates = [
-        model_dir / f"faster-whisper-{model}",
-        model_dir / f"models--Systran--faster-whisper-{model}",
-        model_dir / f"models--guillaumekln--faster-whisper-{model}",
-    ]
-    for candidate in candidates:
-        if (candidate / "model.bin").is_file():
-            return True
-        if (candidate / "snapshots").is_dir():
-            return True
-    return False
+    Delegates to :mod:`app.models` so preflight and the server can never
+    disagree about what "cached" means.
+    """
+    return models.resolve(model_dir, model).path is not None
 
 
 def endpoint_host() -> str:
@@ -57,7 +47,7 @@ def reachable(host: str, port: int = 443, timeout: float = 5.0) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="EchoNote preflight checks")
-    parser.add_argument("--model", default=os.getenv("ECHONOTE_MODEL") or "small")
+    parser.add_argument("--model", default=os.getenv("ECHONOTE_MODEL") or models.DEFAULT_KEY)
     parser.add_argument(
         "--model-dir",
         default=os.getenv("ECHONOTE_MODEL_DIR", str(ROOT / "models")),
@@ -68,20 +58,24 @@ def main() -> int:
     model_dir = Path(args.model_dir)
 
     if model_cached(args.model, model_dir):
-        print(f"[EchoNote] 模型已缓存：{args.model}")
+        target = models.resolve(model_dir, args.model)
+        print(f"[EchoNote] 模型已在本机：{target.key}（{target.label}）→ {target.path}")
         return 0
 
     host = endpoint_host()
-    print(f"[EchoNote] 模型未缓存，首次运行需要联网下载（约 500 MB，来源 {host}）…")
+    spec = models.resolve(model_dir, args.model).spec
+    size = f"约 {spec.size_mb} MB" if spec else "数百 MB"
+    print(f"[EchoNote] 模型未就绪，首次使用需要联网下载（{size}，来源 {host}）…")
 
     if reachable(host, 443, args.timeout):
         return 0
 
     print(
-        "[EchoNote] 无法连接模型下载站点，且本机没有缓存模型。\n"
-        f"  · 需要联网下载约 500 MB，或提前把模型放到 {model_dir}\n"
-        "  · 国内网络可设置镜像：set HF_ENDPOINT=https://hf-mirror.com\n"
-        "  · 也可以直接指向本地模型目录：set ECHONOTE_MODEL=D:\\models\\faster-whisper-small",
+        "[EchoNote] 无法连接模型下载站点，且本机没有可用模型。\n"
+        f"  · 联网下载一次：python tools/fetch_model.py --model {args.model}\n"
+        f"  · 或把模型目录放到 {model_dir}\n"
+        "  · 国内网络默认已走 https://hf-mirror.com，可用 HF_ENDPOINT 覆盖\n"
+        "  · 也可以直接指向本地模型目录：set ECHONOTE_MODEL=D:\\models\\faster-whisper-large-v3-turbo",
         file=sys.stderr,
     )
     return 3

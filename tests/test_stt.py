@@ -16,7 +16,9 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from app import stt
+from pathlib import Path
+
+from app import config, models, stt
 
 
 class FakeModel:
@@ -60,7 +62,7 @@ def test_clean_keeps_real_text():
 
 def test_zh_gets_the_simplified_chinese_prompt(fake):
     assert stt.transcribe(audio(), "zh") == "你好"
-    assert fake.calls[0]["initial_prompt"] == "这是一段普通话的录音。"
+    assert fake.calls[0]["initial_prompt"] == stt.config.ASR_PROMPT_ZH
     assert fake.calls[0]["language"] == "zh"
 
 
@@ -79,9 +81,25 @@ def test_fast_uses_beam_one_and_final_uses_beam_five(fake):
     assert fake.calls[1]["beam_size"] == 5
     for call in fake.calls:
         assert call["vad_filter"] is False
-        assert call["condition_on_previous_text"] is False
         assert call["without_timestamps"] is True
-        assert call["temperature"] == 0.0
+
+    # Partials are thrown away once the final lands, so they stay greedy and
+    # do not carry context; the final pass pays for both.
+    assert fake.calls[0]["temperature"] == 0.0
+    assert fake.calls[0]["condition_on_previous_text"] is False
+    # A single decoding pass by default: the temperature ladder truncated long
+    # audio on the project's own sample (see config.ASR_TEMPERATURES).
+    assert fake.calls[1]["temperature"] == stt.config.ASR_TEMPERATURES
+    assert fake.calls[1]["condition_on_previous_text"] is True
+
+
+def test_final_pass_sets_quality_thresholds(fake):
+    """These three thresholds are what stop silence from becoming text."""
+    stt.transcribe(audio(), "zh")
+    call = fake.calls[0]
+    assert call["no_speech_threshold"] == stt.config.ASR_NO_SPEECH_THRESHOLD
+    assert call["log_prob_threshold"] == stt.config.ASR_LOG_PROB_THRESHOLD
+    assert call["compression_ratio_threshold"] == stt.config.ASR_COMPRESSION_RATIO_THRESHOLD
 
 
 def test_short_audio_is_ignored_without_calling_the_model(fake):
@@ -120,8 +138,77 @@ def test_sanitize_error_is_short():
 def test_status_shape(monkeypatch):
     monkeypatch.setattr(stt, "_attempts", 2, raising=False)
     data = stt.status()
-    for key in ("ready", "model", "error", "retrying", "attempts"):
+    for key in (
+        "ready",
+        "model",
+        "error",
+        "retrying",
+        "attempts",
+        "model_label",
+        "model_key",
+        "offline_ready",
+    ):
         assert key in data
+
+
+# --------------------------------------------------------------------------
+# FR-046: offline behaviour
+# --------------------------------------------------------------------------
+
+
+def _fake_model_dir(root: Path) -> Path:
+    folder = root / "faster-whisper-small"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "config.json").write_text("{}", encoding="utf-8")
+    (folder / "model.bin").write_bytes(b"\0" * (2 << 20))
+    return folder
+
+
+def test_offline_without_a_model_never_starts_a_download(
+    monkeypatch, tmp_path, whisper_module
+):
+    """Air-gapped + no weights must fail immediately, not block for minutes."""
+    monkeypatch.setenv("ECHONOTE_OFFLINE", "1")
+    monkeypatch.setattr(config, "MODEL_DIR", str(tmp_path))
+    monkeypatch.setattr(config, "MODEL_CHOICE", None)
+
+    assert stt.load() is False
+    assert whisper_module["calls"] == 0
+
+    reported = stt.status()
+    assert reported["ready"] is False
+    assert reported["offline_ready"] is False
+    assert "未找到模型" in reported["error"]
+    assert str(tmp_path) in reported["error"]
+
+
+def test_local_model_is_loaded_from_disk_without_the_hub(
+    monkeypatch, tmp_path, whisper_module
+):
+    folder = _fake_model_dir(tmp_path)
+    monkeypatch.setenv("ECHONOTE_OFFLINE", "1")
+    monkeypatch.setattr(config, "MODEL_CHOICE", str(folder))
+
+    assert stt.load() is True
+    assert whisper_module["name"] == str(folder)
+    assert whisper_module["kwargs"]["local_files_only"] is True
+    assert stt.status()["offline_ready"] is True
+
+
+def test_missing_model_without_offline_still_attempts_a_download(
+    monkeypatch, tmp_path, whisper_module
+):
+    """A brand-new install has to be able to fetch its model once."""
+    monkeypatch.delenv("ECHONOTE_OFFLINE", raising=False)
+    monkeypatch.setattr(config, "MODEL_DIR", str(tmp_path))
+    monkeypatch.setattr(config, "MODEL_CHOICE", None)
+
+    assert stt.load() is True
+    assert whisper_module["calls"] == 1
+    # No local folder -> loader gets a repo id and is allowed to reach out.
+    assert whisper_module["name"] == models.BY_KEY[models.DEFAULT_KEY].repo
+    assert whisper_module["kwargs"]["local_files_only"] is False
+    assert stt.status()["offline_ready"] is False
 
 
 # --------------------------------------------------------------------------
@@ -139,6 +226,8 @@ def whisper_module(monkeypatch):
     class WhisperModel:
         def __init__(self, name, **kwargs):
             state["calls"] += 1
+            state["name"] = name
+            state["kwargs"] = kwargs
             if state["fail"]:
                 raise RuntimeError(
                     r"Unable to download C:\Users\bob\.cache\model.bin?token=zzz"
@@ -234,3 +323,50 @@ def test_preload_loads_in_the_background(whisper_module, monkeypatch):
     monkeypatch.setattr(stt, "_scheduler_started", False, raising=False)
     stt.preload()
     assert wait_ready()
+
+
+# --------------------------------------------------------------------------
+# FR-047: runtime model switch
+# --------------------------------------------------------------------------
+
+
+def test_switch_refuses_a_model_that_is_not_on_disk(monkeypatch, tmp_path, whisper_module):
+    monkeypatch.setattr(config, "MODEL_DIR", str(tmp_path))
+    monkeypatch.setattr(config, "MODEL_CHOICE", None)
+
+    result = stt.switch("large-v3-turbo")
+    assert result["ok"] is False
+    assert "faster-whisper-large-v3-turbo" in result["error"]
+    # A switch must never become an accidental download.
+    assert whisper_module["calls"] == 0
+
+
+def test_switch_loads_an_installed_model(monkeypatch, tmp_path, whisper_module):
+    folder = _fake_model_dir(tmp_path)
+    monkeypatch.setattr(config, "MODEL_DIR", str(tmp_path))
+    monkeypatch.setattr(config, "MODEL_CHOICE", None)
+
+    result = stt.switch("small")
+    assert result == {"ok": True, "switching": True, "key": "small"}
+    assert wait_ready()
+    assert whisper_module["name"] == str(folder)
+    assert stt.status()["model_key"] == "small"
+
+
+def test_offline_missing_model_does_not_auto_retry(monkeypatch, tmp_path, whisper_module):
+    """A missing model is a permanent condition: retrying it forever is noise."""
+    monkeypatch.setenv("ECHONOTE_OFFLINE", "1")
+    monkeypatch.setattr(config, "MODEL_DIR", str(tmp_path))
+    monkeypatch.setattr(config, "MODEL_CHOICE", None)
+    monkeypatch.setattr(stt, "_retry_blocked", False, raising=False)
+    monkeypatch.setattr(stt, "_last_failure_at", 0.0, raising=False)
+
+    assert stt.load() is False
+    assert stt.maybe_auto_retry() is False
+    # A human can still force an attempt, even though auto-retry is blocked.
+    attempts_before = stt._attempts
+    stt.retry()
+    deadline = time.monotonic() + 3
+    while stt._attempts == attempts_before and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert stt._attempts > attempts_before

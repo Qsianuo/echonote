@@ -22,7 +22,6 @@ import threading
 import time
 import urllib.request
 import webbrowser
-from pathlib import Path
 
 from . import config
 
@@ -98,6 +97,7 @@ def _fix_console_encoding() -> None:
 
 
 def _banner() -> None:
+    target = config.model_target()
     bar = "=" * 58
     print(bar)
     print(f"  EchoNote 声记  v{config.APP_VERSION}  ({config.APP_STAGE})")
@@ -105,19 +105,52 @@ def _banner() -> None:
     print(bar)
     print(f"  界面地址：{_base_url()}")
     if _model_on_disk():
-        print("  模型：已就绪")
+        print(f"  模型：{target.label}（{target.key}）已就绪 · 可离线使用")
+    elif config.offline_mode():
+        print(f"  模型：未找到 {target.key}，当前为离线模式")
+        print(f"        请把模型放入 {config.MODEL_DIR}")
     else:
-        print("  模型：首次运行需下载约 464 MB，请稍等几分钟")
-        print("        国内网络较慢时，改用镜像启动：EchoNote.exe --mirror")
+        print(f"  模型：未找到 {target.key}（约 {target.spec.size_mb if target.spec else 1600} MB）")
+        print("        联网时会自动下载；也可用 --mirror 走国内镜像")
     print("  关闭这个窗口即可退出 EchoNote")
     print(bar)
     sys.stdout.flush()
 
 
 def _model_on_disk() -> bool:
-    """True when the model is already present, so we can promise no download."""
-    model = Path(config.MODEL_NAME)
-    return model.is_dir() and (model / "model.bin").is_file()
+    """True when the weights are local, so we can promise offline operation."""
+    return config.model_target().path is not None
+
+
+def _fetch_model(argv: list[str]) -> int:
+    """``--fetch-model [key]``: the offline preparation step.
+
+    Exists so a packaged user never needs Python installed just to obtain the
+    weights; ``fetch-model.bat`` next to the exe calls this.
+    """
+    from . import fetch, models
+
+    key = models.DEFAULT_KEY
+    for item in argv[argv.index("--fetch-model") + 1 :]:
+        if not item.startswith("-"):
+            key = item.strip()
+            break
+
+    spec = models.BY_KEY.get(key)
+    if spec is None:
+        print(f"未知模型 {key!r}。可用：{', '.join(models.BY_KEY)}")
+        return 2
+
+    print("=" * 58)
+    print(f"  EchoNote 声记  v{config.APP_VERSION}  模型下载")
+    print("=" * 58)
+    print(f"  目标目录：{config.MODEL_DIR}")
+    print("  只需执行一次，之后断网也能用")
+    print("=" * 58)
+    ok = fetch.download(spec, config.MODEL_DIR, force="--force" in argv)
+    print()
+    print("完成。现在可以断网使用。" if ok else "下载未完成，请检查网络后重试。")
+    return 0 if ok else 1
 
 
 def _self_test() -> int:
@@ -157,12 +190,18 @@ def main() -> int:
     # we never silently redirect someone's downloads.
     if "--mirror" in sys.argv:
         os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+    # Air-gapped machines: refuse any network attempt and say where the files
+    # belong, instead of hanging on a download that cannot succeed.
+    if "--offline" in sys.argv:
+        os.environ["ECHONOTE_OFFLINE"] = "1"
 
     if "--self-test" in sys.argv:
         return _self_test()
     if "--version" in sys.argv:
         print(f"EchoNote {config.APP_VERSION} ({config.APP_STAGE})")
         return 0
+    if "--fetch-model" in sys.argv:
+        return _fetch_model(sys.argv)
 
     url = _base_url()
 

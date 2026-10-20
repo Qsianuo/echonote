@@ -8,16 +8,16 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![Whisper](https://img.shields.io/badge/faster--whisper-local%20STT-412991?style=flat-square&logo=openai&logoColor=white)](https://github.com/SYSTRAN/faster-whisper)
 [![License](https://img.shields.io/badge/License-MIT-64ffda?style=flat-square)](LICENSE)
-[![Stage](https://img.shields.io/badge/stage-v0.9.0%20tech%20preview-f0b429?style=flat-square)](#-延迟口径重要)
+[![Stage](https://img.shields.io/badge/stage-v0.10.0%20tech%20preview-f0b429?style=flat-square)](#-延迟口径重要)
 
-边说边出字 · 录音不上传 · 安装后可离线 · 支持中英日韩等多语言
+边说边出字 · 录音不上传 · 装好模型后完全离线 · 支持中英日韩等多语言
 
 </div>
 
 ---
 
-> **这是 v0.9.0 技术预览（tech preview），不是 v1.0.0。**
-> 三件事需要先说清楚：**实验性**；**延迟取决于硬件**（见下文的口径，尚未达标）；**首次运行需要联网下载模型**，之后可以离线使用。
+> **这是 v0.10.0 技术预览（tech preview），不是 v1.0.0。**
+> 三件事需要先说清楚：**实验性**；**延迟取决于硬件与所选模型**（见下文的口径，尚未达标）；**默认模型比 v0.9 更大**，首次准备需要一次性下载，之后可完全断网运行。
 
 ---
 
@@ -26,6 +26,8 @@
 - 🎙 **一键录音** —— 浏览器麦克风采集，16 kHz 单声道 PCM
 - ⚡ **实时转写** —— 边说边出字，停顿后自动断句
 - 🔒 **完全本地** —— 语音识别使用本地 faster-whisper 模型，音频不上传任何服务器
+- 🧠 **默认可选模型** —— 高精度档用 `large-v3-turbo`，「实时」→「实时」这类同音错字会明显减少；界面里可随时切到「快速」档
+- 🔌 **真正离线** —— 模型在磁盘上时，识别全程零联网；`--offline` 还能强制断网启动
 - 🌍 **多语言** —— 中文 / 英文 / 日文 / 韩文 / 法文 / 德文 / 西班牙文 / 俄文，可自动识别
 - 📝 **四种导出** —— TXT 文本、Markdown 笔记、SRT 字幕、WAV 原始录音
 - 🎨 **深色界面** —— 录音状态、实时波形、计时器、自动滚动字幕
@@ -34,7 +36,7 @@
 
 ![EchoNote 界面](docs/screenshot.png)
 
-> 截图取自 v0.9.0 实际运行（真实模型 + 8.95 s 中文样例音频）。全套流程见
+> 截图取自 v0.10.0 打包版实际运行（离线模式 + `large-v3-turbo` + 8.95 s 中文样例音频）。全套流程见
 > `docs/screenshots/`：空态 → 录音中 → 停止后字幕 → 导出菜单 → 窄屏。
 > 该次录音导出的四种文件在 `docs/examples/`。
 
@@ -46,24 +48,43 @@
 `EchoNote-*-windows-x64.zip`，解压后双击 `EchoNote.exe` 即可。
 
 1. 解压到**任意可写目录**（例如 `D:\EchoNote`），不要放 `C:\Program Files`
-2. 双击 `EchoNote.exe`，会弹出一个黑色命令行窗口
-3. 模型加载完成后浏览器自动打开，点麦克风开始录音
+2. 双击 **`fetch-model.bat`** 准备模型（默认高精度档，约 1.6 GB，自动走国内镜像）
+3. 双击 `EchoNote.exe`，模型就绪后浏览器自动打开，点麦克风开始录音
 4. 关闭命令行窗口即退出
 
-**首次启动要下载约 464 MB 的识别模型**（只下载一次，之后离线可用）。国内网络较慢时：
+> 已有离线模型包的，把 `models\` 整个目录放进解压目录（与 `EchoNote.exe` 同级）即可跳过第 2 步。
 
-```bat
-set HF_ENDPOINT=https://hf-mirror.com
-EchoNote.exe
-```
-
-排查问题用自检命令，会把原生依赖和前端资源逐项列出来：
+排查问题用自检命令，会把原生依赖、前端资源、模型状态逐项列出来：
 
 ```bat
 EchoNote.exe --self-test
 ```
 
 > 绿色版，不写注册表、不留后台服务。录音与识别全在本机，音频不会离开电脑。
+
+---
+
+## 🔌 离线使用
+
+模型一旦落在 `models\` 里，**识别过程不会再发任何网络请求** —— 不是"缓存可能命中"，而是加载时直接拿本地目录，faster-whisper 根本没有机会去查 Hub。
+
+三种离线场景：
+
+| 场景 | 做法 |
+|---|---|
+| 先联网准备一次，之后断网 | 跑一次 `fetch-model.bat`，或 `python tools/fetch_model.py` |
+| 完全隔离的机器 | 在有网的机器上下载 `models\` 目录，拷到目标机器 exe 同级 |
+| 需要硬保证不联网 | `EchoNote.exe --offline`（或 `ECHONOTE_OFFLINE=1`），缺模型时立刻报错并给出应放路径，不会卡在下载上 |
+
+验证离线是否真的生效：
+
+```bat
+EchoNote.exe --self-test
+```
+
+输出里 `model on disk : yes` 表示权重已在本机；界面上出现绿色的 **「离线可用」** 角标，表示当前进程加载的就是本地权重。
+
+界面里的 `识别模型` 下拉框可以随时切换已安装的档位，切换只加载本地文件，**不会触发下载**。
 
 ---
 
@@ -111,36 +132,51 @@ python packaging/smoke_test.py dist/EchoNote/EchoNote.exe
 
 ## ⚡ 延迟口径（重要）
 
-延迟强依赖 CPU 与模型，**不要用单一数字概括**。EchoNote 采用分档判定：
+两个反直觉的实测结论，都影响你怎么选模型：
 
-| 档位 | 硬件 | 首条 partial（相对语音起点） | final（相对句末） |
-|------|------|------------------------------|-------------------|
-| **A** | ≥8 逻辑核 + `small` + int8 | 目标 p95 ≤ 2.0 s | 目标 p95 ≤ 3.0 s |
-| B | 4 核 | 披露，不判定 | 披露，不判定 |
-| C | ≥12 核 | 目标 1.5 s | 目标 2.5 s |
+**① 耗时几乎全在编码器，解码参数救不回来。** 同一段音频、同一个模型，`beam_size=1` 与 `beam_size=5`、有无温度回退，耗时差异都在 7% 以内（噪声量级）。
 
-- 判定要求 **≥30 句样本 × 3 次运行取中位**，不是两台机器上的两支观测值。
-- 开发机（8 核 / `small`）当前实测 final 为 **4.24–4.90 s（n=2）**，**尚未达标**；这也是它仍是技术预览的原因之一。
-- `ECHONOTE_PARTIAL_INTERVAL_S` 只是**下限节流**，不是对外承诺值。
+**② 句子越短，单位时间越亏。** Whisper 每次调用都会把音频补齐到 30 s 再编码，所以一次调用的成本几乎是常数。同一段 8.95 s 语音：
+
+| 切法 | 音频长度 | 转写耗时 | 折算 RTF |
+|---|---|---|---|
+| 真实录音（VAD 切成 3 句） | 每句 ~3 s | 每句 ~12 s | **3.9**（服务端实测） |
+| 整段喂进去 | 8.95 s | 13.4 s | **1.50** |
+
+开发机（i5-8300H，4 核 8 线程，纯 CPU int8）实测：
+
+| 模型 | 整段 RTF（9 s） | 整段 RTF（30 s） | 真实 3 s 句子 | CER |
+|---|---|---|---|---|
+| `small` | 0.41 | 0.19 | ~1.2 | 17.2% |
+| `medium` | 1.08 | 0.54 | 未单独实测 | 13.8% |
+| `large-v3-turbo` | 1.50 | 0.50 | **3.9** | 13.8% |
+
+**结论：4 核机器上用高精度档，字幕会明显落后于说话。** 想要接近实时就切「快速」档；8 核以上再考虑常开高精度。
+
+- 服务端把这个实测值放进状态，界面直接显示「比说话慢约 N 倍」，不用你自己算。
+- 「识别模型」下拉框可随时切换，切换只加载本地文件，**不会触发下载**。
+- A/B/C 档的 p95 门禁（首条 partial ≤2.0 s、final ≤3.0 s）**仍未达标**，这是技术预览的原因之一；上表是单段样本的相对比较，不是达标证据。
 
 ---
 
-## 🌐 国内网络提示
+## 🌐 模型下载与国内网络
 
-模型托管在 Hugging Face，首次下载可能较慢。可使用镜像：
+模型托管在 Hugging Face。`fetch-model.bat` 与 `python tools/fetch_model.py` 默认就走 `https://hf-mirror.com`，并且关掉了镜像无法代理的 Xet 通道：
 
 ```bash
-# Windows CMD
-set HF_ENDPOINT=https://hf-mirror.com
+# 默认档（高精度，约 1.6 GB）
+python tools/fetch_model.py
 
-# PowerShell
-$env:HF_ENDPOINT="https://hf-mirror.com"
+# 指定档位 / 换源 / 强制重下
+python tools/fetch_model.py --model small
+python tools/fetch_model.py --endpoint https://huggingface.co
+python tools/fetch_model.py --force
 
-# macOS / Linux
-export HF_ENDPOINT=https://hf-mirror.com
+# 查看有哪些档、哪些已经装好
+python tools/fetch_model.py --list
 ```
 
-也可以先把模型放到 `models/faster-whisper-small/`，再用 `ECHONOTE_MODEL` 指向它，实现完全离线启动。
+也可以手工把任意转换好的模型目录放到 `models/<名字>/`（需含 `model.bin` 与 `config.json`），再用 `ECHONOTE_MODEL=<目录>` 指过去。
 
 ---
 
@@ -150,13 +186,19 @@ export HF_ENDPOINT=https://hf-mirror.com
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `ECHONOTE_MODEL` | `small` | 模型：`tiny` / `base` / `small` / `medium` / `large-v3`，或本地目录 |
-| `ECHONOTE_MODEL_DIR` | `./models` | 模型缓存目录 |
+| `ECHONOTE_MODEL` | `large-v3-turbo` | 档位：`tiny` / `small` / `medium` / `large-v3-turbo` / `large-v3`，或任意本地目录 |
+| `ECHONOTE_MODEL_DIR` | `./models` | 模型目录 |
+| `ECHONOTE_OFFLINE` | 未设置 | 设为 `1` 后禁止一切联网；缺模型时立即报错并给出应放路径 |
 | `ECHONOTE_LANGUAGE` | `zh` | 默认语言，如 `zh`、`en`；`auto` 为自动识别 |
 | `ECHONOTE_VAD_THRESHOLD` | `0.010` | 能量阈值。**数值越大越不灵敏**（更难触发），越小越容易把噪声当语音 |
-| `ECHONOTE_VAD_HANGOVER_MS` | `650` | 停顿多久算一句结束。按 30 ms 向下取整，**实际 630 ms** |
-| `ECHONOTE_VAD_MIN_SPEECH_MS` | `280` | 最短语音，按帧取整后**实际 270 ms**，更短的片段直接丢弃 |
-| `ECHONOTE_VAD_MAX_SEGMENT_S` | `15` | 单段最长时长，到点强制切分 |
+| `ECHONOTE_VAD_HANGOVER_MS` | `900` | 停顿多久算一句结束。按 30 ms 取整，**实际 900 ms** |
+| `ECHONOTE_VAD_MIN_SPEECH_MS` | `240` | 最短语音，按帧取整后**实际 240 ms**，更短的片段直接丢弃 |
+| `ECHONOTE_VAD_MAX_SEGMENT_S` | `30` | 单段最长时长，到点强制切分。切太短会丢上下文，反而更不准 |
+| `ECHONOTE_BEAM_SIZE` | `5` | final 的 beam 宽度；`1` 更快但错字更多 |
+| `ECHONOTE_TEMP_FALLBACK` | 未设置 | 开启温度回退阶梯。**本机实测会把 30 s 音频截断到 1/3，默认关闭** |
+| `ECHONOTE_CONDITION_ON_PREVIOUS` | `1` | final 是否承接上一句上下文 |
+| `ECHONOTE_PROMPT_ZH` | 见源码 | 中文 initial_prompt，用于压住繁体与无标点输出 |
+| `ECHONOTE_CPU_THREADS` | `0` | ctranslate2 线程数，`0` 为自动 |
 | `ECHONOTE_PARTIAL_INTERVAL_S` | `1.2` | 实时字幕**下限节流**间隔，不是承诺值 |
 | `ECHONOTE_MAX_RECORD_MINUTES` | `90` | 录音时长软上限；`0` 表示不限（界面会提示内存风险自负） |
 | `ECHONOTE_HOST` | `127.0.0.1` | 监听地址（启动脚本会让它生效） |
@@ -167,14 +209,17 @@ export HF_ENDPOINT=https://hf-mirror.com
 
 ### 模型选择建议
 
-| 模型 | 体积 | 速度 | 中文准确率 | 适合 |
-|------|------|------|-----------|------|
-| `tiny` | ~75 MB | 最快 | 一般 | 低配试水 |
-| `base` | ~145 MB | 快 | 可用 | 普通配置 |
-| **`small`** | ~490 MB | 适中 | **好** | **默认推荐** |
-| `medium` | ~1.5 GB | 慢 | 很好 | 高配 / 高精度 |
+| 模型 | 体积 | 整段 RTF（9 s） | 中文表现 | 适合 |
+|------|------|----------------|---------|------|
+| `tiny` | ~75 MB | 未测 | 差 | 只用来验证链路通不通 |
+| `small` | ~464 MB | 0.41 | 本机样本 CER 17.2%，「实时」听成「时时」 | 4 核机器、要求低延迟 |
+| `medium` | ~1.5 GB | 1.08 | 本机样本 CER 13.8%，与 turbo 相同但快 28% | 6 核以上，平衡选择 |
+| **`large-v3-turbo`** | ~1.6 GB | **1.50** | 本机样本 CER 13.8%，同音字错误被纠正 | **默认档；8 核以上体验最好** |
+| `large-v3` | ~3.1 GB | 未测 | 理论最好 | 8 核以上再考虑 |
 
-> 纯 CPU 即可运行（int8 量化）。独立显卡不是必需的。
+> 纯 CPU 即可运行（int8 量化），独立显卡不是必需的。int8 与 float32 在本机样本上输出**逐字相同**，只是慢 40%，所以量化不是准确率的瓶颈，模型规模才是。
+>
+> 这个 CER 是在**一段**人工核对过的音频上算的，用于横向比较三个模型，不代表通用中文准确率。完整基线需要 ≥30 句人工标注录音（见 `docs/consistency-checklist.md`）。
 
 ---
 
@@ -205,7 +250,7 @@ WebSocket ──▶ FastAPI（每连接一会话）
                  ▼
            能量 VAD 自动断句
             │              │
-     （说到一半）      （停顿 ≥630 ms）
+     （说到一半）      （停顿 ≥900 ms）
             │              │
             ▼              ▼
         faster-whisper 转写
@@ -328,16 +373,16 @@ echonote/
 浏览器要求安全上下文：必须通过 `http://localhost`、`http://127.0.0.1` 或 HTTPS 访问。用局域网 IP 访问时需要 HTTPS。
 
 **模型一直显示「加载中」？**
-首次启动需要下载模型（约 490 MB）。检查网络；国内建议设置 `HF_ENDPOINT=https://hf-mirror.com`。也可以访问 `/api/ready` 看真实状态——`/api/health` 只代表进程活着。
+很可能是模型还没准备好。双击 `fetch-model.bat`（默认走国内镜像）下载一次；或在界面里点「重试」看具体错误。访问 `/api/ready` 能看到真实状态与实测倍速——`/api/health` 只代表进程活着。
 
 **模型加载失败后必须重启吗？**
 不需要。点界面上的「重试」即可；失败后系统还会自动重试 3 次（间隔 60 s），之后保留手动重试入口。
 
 **识别速度慢？**
-换用更小的模型（`ECHONOTE_MODEL=base`），或关闭其他占用 CPU 的程序。延迟口径见上文，请按 A/B/C 档对照。
+先看界面上的倍速提示。`RTF > 1` 说明模型跑不过说话速度：在「识别模型」里切到 `small`（需先 `fetch-model --model small`），或关闭其他占用 CPU 的程序。高精度档在 4 核机器上本来就跑不到实时。
 
 **识别不准确？**
-在左上角选择明确的语言（如「中文」）通常比「自动识别」更准；环境噪声较大时可适当调高 `ECHONOTE_VAD_THRESHOLD`（数值越大越不灵敏），或使用带降噪的麦克风。
+按收益排序：① 用高精度档（`large-v3-turbo`），同音字错误会明显减少；② 明确选「中文」而不是「自动识别」；③ 环境噪声大时调高 `ECHONOTE_VAD_THRESHOLD`（数值越大越不灵敏），或用带降噪的麦克风。
 
 **录音很久会怎样？**
 默认 90 分钟软上限：72 分钟提示，到点自动停止，但已产生的文字与音频全部可以导出，不会静默丢弃。

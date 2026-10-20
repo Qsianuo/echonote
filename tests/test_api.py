@@ -95,3 +95,33 @@ def test_origin_allowlist():
     assert main._origin_allowed("http://127.0.0.1:8000") is True
     assert main._origin_allowed("http://localhost:5173") is True
     assert main._origin_allowed("https://evil.example") is False
+
+
+# --------------------------------------------------------------------------
+# FR-047: model inventory and switching
+# --------------------------------------------------------------------------
+
+
+def test_models_lists_the_catalog_with_install_state(client):
+    body = client.get("/api/models").json()
+    assert body["current"]
+    keys = [item["key"] for item in body["items"]]
+    assert "large-v3-turbo" in keys
+    assert "medium" in keys
+    for item in body["items"]:
+        assert set(item) >= {"key", "label", "size_mb", "tier", "installed"}
+
+
+def test_switching_to_a_missing_model_is_rejected_with_a_path(client):
+    response = client.post("/api/model", json={"key": "large-v3"})
+    assert response.status_code == 400
+    body = response.json()
+    assert body["ok"] is False
+    # The message must say where the files belong, not just "failed".
+    assert "faster-whisper-large-v3" in body["error"]
+
+
+def test_switching_without_a_key_is_a_client_error(client):
+    response = client.post("/api/model", json={})
+    assert response.status_code == 400
+    assert response.json()["ok"] is False

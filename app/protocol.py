@@ -52,6 +52,10 @@ def status(
     attempts: int = 0,
     auto_retry_exhausted: bool = False,
     retry_count: int = 0,
+    model_label: str = "",
+    model_key: str = "",
+    offline_ready: bool = False,
+    rtf: float | None = None,
 ) -> dict:
     return {
         "type": "status",
@@ -63,6 +67,14 @@ def status(
         "attempts": int(attempts),
         "auto_retry_exhausted": bool(auto_retry_exhausted),
         "retry_count": int(retry_count),
+        # Which model is actually loaded, and whether it can run with the
+        # network unplugged (FR-046). The UI shows this instead of guessing
+        # from a path basename.
+        "model_label": str(model_label),
+        "model_key": str(model_key),
+        "offline_ready": bool(offline_ready),
+        # Real-time factor of the last finals. >1 means captions fall behind.
+        "rtf": None if rtf is None else round(float(rtf), 2),
     }
 
 

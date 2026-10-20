@@ -8,7 +8,7 @@
 # hard to spot.
 
 param(
-    [string]$Version = "0.9.0",
+    [string]$Version = "0.10.0",
     [switch]$SkipTest,
     [string]$Python = "python"
 )
@@ -17,22 +17,40 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $root
 
+# Native tools (pyinstaller, python) report progress on stderr. With
+# $ErrorActionPreference = "Stop", Windows PowerShell promotes that to a
+# terminating NativeCommandError, so a perfectly good build looks like a
+# failure. Relax it for the call and decide on $LASTEXITCODE instead.
+function Invoke-Native([string]$What, [scriptblock]$Body) {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $code = 0
+    try {
+        & $Body 2>&1 | Write-Host
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+    if ($code -ne 0) { throw "$What failed (exit $code)" }
+}
+
 Write-Host "==> Building EchoNote $Version" -ForegroundColor Cyan
 
 if (Test-Path build) { Remove-Item build -Recurse -Force }
 if (Test-Path dist) { Remove-Item dist -Recurse -Force }
 
-& $Python -m PyInstaller packaging/echonote.spec --noconfirm --distpath dist --workpath build --log-level WARN *>&1 | Write-Host
-if ($LASTEXITCODE -ne 0) { throw "pyinstaller failed (exit $LASTEXITCODE)" }
-
+Invoke-Native "pyinstaller" {
+    & $Python -m PyInstaller packaging/echonote.spec --noconfirm --distpath dist --workpath build --log-level WARN
+}
 $out = Join-Path $root "dist\EchoNote"
 Copy-Item README.md, LICENSE -Destination $out
-Copy-Item packaging\extras\start-mirror.bat -Destination $out
+Copy-Item packaging\extras\*.bat -Destination $out
 
 if (-not $SkipTest) {
     Write-Host "==> Smoke testing the frozen build" -ForegroundColor Cyan
-    & $Python packaging/smoke_test.py (Join-Path $out "EchoNote.exe") *>&1 | Write-Host
-    if ($LASTEXITCODE -ne 0) { throw "smoke test failed (exit $LASTEXITCODE)" }
+    Invoke-Native "smoke test" {
+        & $Python packaging/smoke_test.py (Join-Path $out "EchoNote.exe")
+    }
 }
 
 Write-Host "==> Packaging zip" -ForegroundColor Cyan

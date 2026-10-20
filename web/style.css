@@ -438,6 +438,22 @@ select {
   border: 1px dashed rgba(100, 255, 218, 0.16);
 }
 
+/* "离线可用" only appears when the weights are actually on this disk, so it
+   is evidence rather than a slogan. */
+.offline-badge {
+  flex: none;
+  margin-left: auto;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+  background: rgba(100, 255, 218, 0.12);
+  border: 1px solid rgba(100, 255, 218, 0.28);
+  white-space: nowrap;
+}
+
 .model-notice {
   margin: 0;
   font-size: 11px;

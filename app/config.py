@@ -11,6 +11,8 @@ import os
 import sys
 from pathlib import Path
 
+from . import models
+
 
 def is_frozen() -> bool:
     """True when running from a PyInstaller build (see ``packaging/``)."""
@@ -57,13 +59,16 @@ ROOT_DIR = _data_dir()
 # version, screenshots) must agree with APP_VERSION, never with the document.
 # --------------------------------------------------------------------------
 
-APP_VERSION = "0.9.0"
+APP_VERSION = "0.10.0"
 APP_STAGE = "tech-preview"
 PROTOCOL_VERSION = "2"
 
 
-def _env_flag(name: str) -> bool:
-    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _env_int(name: str, default: int) -> int:
@@ -86,37 +91,99 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
-def _default_model() -> str:
-    """Use a locally downloaded model directory when one is present.
-
-    This avoids re-downloading from Hugging Face (which can stall on some
-    networks) after ``models/faster-whisper-small`` has been fetched manually.
-    """
-    local = ROOT_DIR / "models" / "faster-whisper-small"
-    if (local / "model.bin").is_file():
-        return str(local)
-    return "small"
-
-
 # --------------------------------------------------------------------------
 # Speech recognition
 # --------------------------------------------------------------------------
 
-MODEL_NAME = os.getenv("ECHONOTE_MODEL") or _default_model()
 MODEL_DIR = os.getenv("ECHONOTE_MODEL_DIR", str(ROOT_DIR / "models"))
+MODEL_CHOICE = os.getenv("ECHONOTE_MODEL", "").strip() or None
 LANGUAGE = os.getenv("ECHONOTE_LANGUAGE", "zh")
+
+# ``ECHONOTE_OFFLINE=1`` forbids *any* network access: a missing model then
+# fails fast with a "where to put the files" message instead of hanging on a
+# 1.6 GB download. It is off by default only so that a brand-new install can
+# still fetch its model once; loading a model that is already on disk never
+# touches the network either way, which is what ``offline_ready`` reports.
+def offline_mode() -> bool:
+    """True when the app must not touch the network at all.
+
+    Read from the environment on every call rather than cached at import, so
+    the desktop entry can honour ``--offline`` after ``config`` was imported.
+    """
+    return _env_flag("ECHONOTE_OFFLINE")
+
+
+def model_target() -> models.Target:
+    """Resolve which model to load. Cheap enough to call per request."""
+    return models.resolve(MODEL_DIR, MODEL_CHOICE, offline=offline_mode())
+
+
+def _default_model() -> str:
+    """Loader argument for the resolved model (path when it exists)."""
+    return model_target().loader_value
+
+
+MODEL_NAME = _default_model()
 
 # Audio
 SAMPLE_RATE = 16000
 
 # Voice activity detection (energy based).
 # NOTE: hangover/min-speech are expressed in milliseconds but consumed as
-# whole 30 ms frames, so the effective values are 630 ms and 270 ms.
-# See docs/consistency-checklist.md.
+# whole 30 ms frames, so the effective values are 900 ms and 240 ms.
+# Both values divide evenly by 30 ms on purpose: the earlier 650/280 ms
+# settings silently became 630/270 ms, which made the documentation disagree
+# with the runtime. See docs/consistency-checklist.md.
+#
+# Segmentation is an accuracy knob, not just a latency knob: Whisper degrades
+# badly on fragments, so we cut only after a long pause and allow long
+# utterances instead of slicing every 15 s.
 VAD_THRESHOLD = _env_float("ECHONOTE_VAD_THRESHOLD", 0.010)
-VAD_HANGOVER_MS = _env_int("ECHONOTE_VAD_HANGOVER_MS", 650)
-VAD_MIN_SPEECH_MS = _env_int("ECHONOTE_VAD_MIN_SPEECH_MS", 280)
-VAD_MAX_SEGMENT_S = _env_float("ECHONOTE_VAD_MAX_SEGMENT_S", 15)
+VAD_HANGOVER_MS = _env_int("ECHONOTE_VAD_HANGOVER_MS", 900)
+VAD_MIN_SPEECH_MS = _env_int("ECHONOTE_VAD_MIN_SPEECH_MS", 240)
+VAD_MAX_SEGMENT_S = _env_float("ECHONOTE_VAD_MAX_SEGMENT_S", 30)
+
+# --------------------------------------------------------------------------
+# Decoding
+#
+# These defaults favour accuracy over the last 200 ms. Partial captions stay
+# greedy (they are thrown away as soon as the final arrives), while the final
+# pass uses beam search with temperature fallback, which is what actually
+# removes repeated or truncated Chinese sentences.
+# --------------------------------------------------------------------------
+
+ASR_BEAM_SIZE = _env_int("ECHONOTE_BEAM_SIZE", 5)
+ASR_BEST_OF = _env_int("ECHONOTE_BEST_OF", 5)
+ASR_PATIENCE = _env_float("ECHONOTE_PATIENCE", 1.0)
+# ctranslate2's 0 means "decide from the machine"; overridable for benchmarks
+# so a latency comparison is not polluted by thread-pool variance.
+ASR_CPU_THREADS = _env_int("ECHONOTE_CPU_THREADS", 0)
+# Temperatures handed to one decoding pass. faster-whisper accepts a tuple and
+# retries a window at the next value when the result looks bad.
+#
+# Measured on this project's 30 s sample: the full ladder silently truncated
+# the transcript to the first third (33 chars instead of 99) and was 40%
+# slower, with medium and identical text at 0.0. Until there is a corpus that
+# shows otherwise, the default is a single pass; the ladder stays available
+# behind ECHONOTE_TEMP_FALLBACK=1 for experiments.
+ASR_TEMPERATURES: tuple[float, ...] = (
+    (0.0, 0.2, 0.4, 0.6, 0.8, 1.0) if _env_flag("ECHONOTE_TEMP_FALLBACK") else (0.0,)
+)
+ASR_NO_SPEECH_THRESHOLD = _env_float("ECHONOTE_NO_SPEECH_THRESHOLD", 0.6)
+ASR_LOG_PROB_THRESHOLD = _env_float("ECHONOTE_LOG_PROB_THRESHOLD", -1.0)
+ASR_COMPRESSION_RATIO_THRESHOLD = _env_float(
+    "ECHONOTE_COMPRESSION_RATIO_THRESHOLD", 2.4
+)
+# Carry context across utterances. Off for partials: a half sentence should
+# not bias the next one.
+ASR_CONDITION_ON_PREVIOUS = _env_flag("ECHONOTE_CONDITION_ON_PREVIOUS", default=True)
+
+# Content-neutral, but pins the output to Simplified Chinese with punctuation.
+# Longer prompts leak their own wording into the transcript.
+ASR_PROMPT_ZH = os.getenv(
+    "ECHONOTE_PROMPT_ZH",
+    "以下是普通话录音，请使用简体中文和标点符号转写。",
+).strip()
 
 # Partial captions. This is a lower-bound throttle only; it is NOT a promise
 # to the user. The user-facing promise is the p95 in PRD FR-008 / RG-06.

@@ -49,6 +49,10 @@ hiddenimports += [
     "websockets.legacy",
     "websockets.legacy.server",
     "app.desktop",
+    # Imported lazily from desktop._fetch_model, so PyInstaller's static
+    # analysis cannot see it.
+    "app.fetch",
+    "app.models",
 ]
 
 excludes = [

@@ -25,6 +25,7 @@
     connPill: document.getElementById('conn-pill'),
     modelPill: document.getElementById('model-pill'),
     language: document.getElementById('language'),
+    modelSelect: document.getElementById('model-select'),
     waveform: document.getElementById('waveform'),
     transcript: document.getElementById('transcript'),
     emptyState: document.getElementById('empty-state'),
@@ -48,13 +49,18 @@
     nsdExport: document.getElementById('nsd-export'),
     nsdConfirm: document.getElementById('nsd-confirm'),
     modelNotice: document.getElementById('model-notice'),
+    offlineBadge: document.getElementById('offline-badge'),
+    offlineNote: document.getElementById('local-note-text'),
+    speedNotice: document.getElementById('speed-notice'),
   };
 
   const state = {
     ws: null,
     connected: false,
     modelReady: false,
-    modelName: 'small',
+    modelKey: '',
+    modelName: '加载中',
+    offlineReady: false,
     recording: false,
     recordingStartedAt: null,
     endedAt: null,
@@ -221,10 +227,42 @@
 
   /* ─────────────────────────── status ─────────────────────────── */
 
-  function modelDisplayName(model) {
-    if (!model) return 'small';
+  function modelDisplayName(model, label) {
+    // The server sends a human label ("高精度"); fall back to the folder name
+    // so an unrecognised custom model still shows something meaningful.
+    if (label) return label;
+    if (!model) return '未知';
     const parts = String(model).split(/[\\/]/);
     return parts[parts.length - 1] || model;
+  }
+
+  function setOfflineBadge(ready) {
+    state.offlineReady = !!ready;
+    if (!el.offlineBadge) return;
+    el.offlineBadge.hidden = !ready;
+    if (el.offlineNote) {
+      el.offlineNote.textContent = ready
+        ? '录音与识别均在本机完成，模型已缓存在磁盘，断网也能用'
+        : '录音与识别均在本机完成，不上传云端，也不写入磁盘';
+    }
+  }
+
+  /**
+   * The server measures the real-time factor of the finals it actually
+   * produced. When a larger model cannot keep up on this CPU, say so with the
+   * number instead of letting the user wonder why captions trail behind.
+   */
+  function updateSpeedNotice(rtfValue) {
+    if (!el.speedNotice) return;
+    const value = Number(rtfValue);
+    if (!Number.isFinite(value) || value <= 1.05) {
+      el.speedNotice.hidden = true;
+      return;
+    }
+    el.speedNotice.hidden = false;
+    el.speedNotice.textContent =
+      `当前模型比说话慢约 ${value.toFixed(1)} 倍，字幕会延迟。` +
+      '可在「识别模型」里切到更快的档位（需已安装），或用 fetch-model 下载小模型。';
   }
 
   function applyStatus(message) {
@@ -234,9 +272,11 @@
     }
 
     state.modelReady = !!message.ready;
-    state.modelName = modelDisplayName(message.model);
+    state.modelName = modelDisplayName(message.model, message.model_label);
     el.modelTag.textContent = state.modelName;
     el.footerModel.textContent = state.modelName;
+    setOfflineBadge(message.offline_ready);
+    updateSpeedNotice(message.rtf);
 
     if (message.error) {
       setModelPill('bad', '模型加载失败');
@@ -268,6 +308,7 @@
     const canRecord = state.modelReady && state.connected;
     el.recordBtn.disabled = !canRecord && !state.recording;
     el.language.disabled = !state.modelReady;
+    if (el.modelSelect) el.modelSelect.disabled = !state.modelReady || state.recording;
   }
 
   async function pollStatus() {
@@ -298,9 +339,10 @@
       if (!res.ok) return;
       const config = await res.json();
 
-      state.modelName = modelDisplayName(config.model);
+      state.modelName = modelDisplayName(config.model, config.model_label);
       el.modelTag.textContent = state.modelName;
       el.footerModel.textContent = state.modelName;
+      setOfflineBadge(config.offline_ready);
       if (el.versionTag && config.version) el.versionTag.textContent = `v${config.version}`;
 
       state.languages = config.languages || [];
@@ -324,8 +366,75 @@
       // The first config message must already carry the server default
       // language (FR-006 AC5), so this awaits before connect().
       sendConfig();
+      loadModels();
     } catch {
       /* defaults stay */
+    }
+  }
+
+  /* ───────────────────────── model selection ───────────────────────── */
+
+  function formatSize(mb) {
+    const value = Number(mb) || 0;
+    return value >= 1024 ? `${(value / 1024).toFixed(1)} GB` : `${value} MB`;
+  }
+
+  async function loadModels() {
+    if (!el.modelSelect) return;
+    try {
+      const res = await fetch('/api/models', { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      const items = data.items || [];
+      const installed = items.filter((item) => item.installed);
+
+      el.modelSelect.textContent = '';
+      items.forEach((item) => {
+        const option = document.createElement('option');
+        option.value = item.key;
+        option.disabled = !item.installed;
+        option.textContent = item.installed
+          ? `${item.label}（${item.key}）· ${formatSize(item.size_mb)}`
+          : `${item.label}（${item.key}）· 未安装`;
+        option.title = item.note || '';
+        el.modelSelect.appendChild(option);
+      });
+      el.modelSelect.value = data.current;
+      state.modelKey = data.current;
+      state.modelsInstalled = installed.length;
+
+      // Always visible: showing the entries that are *not* installed is how a
+      // user discovers that a faster model exists and how to get it.
+      const field = el.modelSelect.closest('.field');
+      if (field) field.hidden = items.length === 0;
+    } catch {
+      /* leave the control disabled */
+    }
+  }
+
+  async function switchModel(key) {
+    if (!key || key === state.modelKey || state.recording) return;
+    setHint('正在切换模型…');
+    announce('正在切换识别模型');
+    try {
+      const res = await fetch('/api/model', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        showError(`切换失败：${data.error || '未知原因'}`);
+        el.modelSelect.value = state.modelKey;
+        return;
+      }
+      state.modelKey = data.key;
+      state.modelReady = false;
+      clearError();
+      pollStatus();
+    } catch {
+      showError('切换请求失败，请确认服务仍在运行');
+      el.modelSelect.value = state.modelKey;
     }
   }
 
@@ -1069,6 +1178,10 @@
     sendConfig();
     announce(`识别语言已切换为${Expo.languageLabel(state.language, state.languages)}`);
   });
+
+  if (el.modelSelect) {
+    el.modelSelect.addEventListener('change', () => switchModel(el.modelSelect.value));
+  }
 
   /**
    * Space toggles recording only when it is not being used as an input key.

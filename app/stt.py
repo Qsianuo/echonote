@@ -16,11 +16,12 @@ import logging
 import re
 import threading
 import time
+from collections import deque
 from pathlib import Path
 
 import numpy as np
 
-from . import config
+from . import config, models
 
 log = logging.getLogger("echonote.stt")
 
@@ -39,6 +40,23 @@ _auto_retries = 0
 _last_failure_at = 0.0
 _scheduler_started = False
 _shutdown = threading.Event()
+# Bumped on every switch so an in-flight load cannot overwrite a newer choice.
+_generation = 0
+_loaded_key: str | None = None
+# Set when the failure needs a human (model not on disk while offline).
+# Auto-retry would just repeat the same certain failure forever.
+_retry_blocked = False
+# Last few final-pass real-time factors. Median, not mean: one slow utterance
+# caused by a background build should not relabel the model as unusable.
+_rtf_samples: deque[float] = deque(maxlen=5)
+
+
+def rtf() -> float | None:
+    """Median real-time factor of recent finals, or None before the first."""
+    if not _rtf_samples:
+        return None
+    values = sorted(_rtf_samples)
+    return round(values[len(values) // 2], 2)
 
 # Absolute paths deeper than two levels leak the user's directory layout
 # into the UI (FR-020 AC2). URLs keep their host because they are useful.
@@ -82,7 +100,9 @@ def load() -> bool:
     Safe to call from any thread; concurrent callers serialise on the lock.
     """
     global _model, _error, _loading, _attempts, _auto_retries, _last_failure_at
+    global _loaded_key, _retry_blocked
 
+    generation = _generation
     with _load_lock:
         if _model is not None:
             return True
@@ -91,23 +111,54 @@ def load() -> bool:
         _attempts += 1
         _error = None
         try:
+            target = config.model_target()
+            if target.path is None:
+                # No usable model on disk. When offline we refuse immediately:
+                # blocking for minutes on a download that cannot succeed is
+                # the worst possible failure mode for an air-gapped machine.
+                hint = models.missing_hint(config.MODEL_DIR, target)
+                if config.offline_mode():
+                    _error = hint
+                    _last_failure_at = time.monotonic()
+                    # Nothing changes until a human moves files, so stop the
+                    # auto-retry loop from burning a tick every 60 s forever.
+                    _retry_blocked = True
+                    log.warning("Offline mode with no local model: %s", hint)
+                    return False
+                log.info("Model %s not on disk, one-time download allowed", target.key)
+
+            # Blocks any accidental hub call from inside faster-whisper. Set
+            # before the import so the library picks it up at module load.
+            models.apply_offline_env()
+
             from faster_whisper import WhisperModel
 
             log.info(
-                "Loading Whisper model '%s' (this may take a while on first run)...",
-                config.MODEL_NAME,
+                "Loading Whisper model '%s' (%s, %s)...",
+                target.key,
+                target.label,
+                target.source,
             )
             model = WhisperModel(
-                config.MODEL_NAME,
+                target.loader_value,
                 device="cpu",
                 compute_type="int8",
                 download_root=config.MODEL_DIR,
+                local_files_only=target.path is not None,
+                cpu_threads=config.ASR_CPU_THREADS,
             )
+            if generation != _generation:
+                # A switch happened while this load was running; the newer
+                # request owns the output, so do not resurrect the old model.
+                log.info("Discarding stale model load (superseded by a switch)")
+                return False
+
             _model = model
+            _loaded_key = target.key
             _error = None
             _auto_retries = 0
             _ready.set()
-            log.info("Whisper model ready.")
+            log.info("Whisper model ready: %s", target.key)
             return True
         except Exception as exc:  # noqa: BLE001 - the message is the product surface
             _error = sanitize_error(exc)
@@ -124,12 +175,14 @@ def retry() -> dict:
     Resets the automatic-retry budget so a user who fixed their environment
     gets a fresh set of attempts. Returns immediately; poll ``status()``.
     """
-    global _auto_retries, _pending_loads
+    global _auto_retries, _pending_loads, _retry_blocked
 
     if _ready.is_set():
         return status()
 
     _auto_retries = 0
+    # A human asked, so allow the attempt even if the automatic policy gave up.
+    _retry_blocked = False
     # Never block on _load_lock here: an in-flight load can take minutes and
     # the UI needs an immediate answer ("正在重试").
     if not _loading:
@@ -146,6 +199,38 @@ def _load_tracked() -> None:
         _pending_loads = max(0, _pending_loads - 1)
 
 
+def switch(model_key: str) -> dict:
+    """Swap to another **installed** model without restarting the process.
+
+    Switching from the UI must never start a download: someone in the middle
+    of a meeting should not discover a 1.6 GB pull. Missing models are
+    rejected with the folder they should be placed in.
+    """
+    global _model, _error, _pending_loads, _generation, _retry_blocked
+
+    target = models.resolve(config.MODEL_DIR, model_key)
+    if target.path is None:
+        return {"ok": False, "error": models.missing_hint(config.MODEL_DIR, target)}
+
+    current = config.model_target()
+    if target.path == current.path and _ready.is_set() and _loaded_key == target.key:
+        return {"ok": True, "switching": False, "key": target.key}
+
+    # No lock here: an in-flight load can hold it for minutes, and the HTTP
+    # request must answer immediately. The generation counter makes the old
+    # load discard its own result instead.
+    _generation += 1
+    config.MODEL_CHOICE = model_key
+    _model = None
+    _ready.clear()
+    _error = None
+    _retry_blocked = False
+    _pending_loads += 1
+    threading.Thread(target=_load_tracked, name="whisper-switch", daemon=True).start()
+    log.info("Switching model to %s", target.key)
+    return {"ok": True, "switching": True, "key": target.key}
+
+
 def maybe_auto_retry() -> bool:
     """One scheduling tick of the auto-retry policy (FR-036 AC4).
 
@@ -156,6 +241,8 @@ def maybe_auto_retry() -> bool:
     global _auto_retries
 
     if _ready.is_set() or _error is None or _loading or _pending_loads:
+        return False
+    if _retry_blocked:
         return False
     if _auto_retries >= MAX_AUTO_RETRIES:
         return False
@@ -199,15 +286,23 @@ def is_ready() -> bool:
 
 def status() -> dict:
     attempts = _attempts
+    target = config.model_target()
     return {
         "ready": _ready.is_set(),
-        "model": config.MODEL_NAME,
+        "model": target.loader_value,
         "error": _error,
         "retrying": bool(_loading or _pending_loads),
         "attempts": attempts,
         "auto_retry_exhausted": bool(_error is not None and _auto_retries >= MAX_AUTO_RETRIES),
         # Progress hint for the UI ("正在重试（第 n 次）").
         "retry_count": _auto_retries,
+        "model_label": target.label,
+        "model_key": target.key,
+        # True means the weights sit on this disk, so recognition works with
+        # the network unplugged (FR-046 AC1).
+        "offline_ready": target.path is not None,
+        # Measured, not estimated: see :func:`rtf`.
+        "rtf": rtf(),
     }
 
 
@@ -231,23 +326,41 @@ def transcribe(audio: np.ndarray, language: str | None = None, fast: bool = Fals
     prompt = None
     if lang == "zh":
         # Bias towards Simplified Chinese with punctuation.
-        # Short, content-neutral prompt. Longer instruction prompts bias the
-        # model's word choice (e.g. "实时" -> "时时") and hurt accuracy.
-        prompt = "这是一段普通话的录音。"
+        # Content-neutral: a prompt with real sentences leaks its own wording
+        # into the transcript, which is why this is an instruction, not an
+        # example sentence.
+        prompt = config.ASR_PROMPT_ZH or None
 
     with _infer_lock:
+        started = time.perf_counter()
         segments, _info = model.transcribe(
             audio,
             language=lang,
-            beam_size=1 if fast else 5,
-            best_of=1,
-            temperature=0.0,
+            # Partials are thrown away as soon as the final lands, so they stay
+            # greedy. The final pass pays for beam search because that is where
+            # repeated / truncated Chinese sentences actually get fixed.
+            beam_size=1 if fast else config.ASR_BEAM_SIZE,
+            best_of=1 if fast else config.ASR_BEST_OF,
+            patience=1.0 if fast else config.ASR_PATIENCE,
+            temperature=0.0 if fast else config.ASR_TEMPERATURES,
             vad_filter=False,
-            condition_on_previous_text=False,
+            condition_on_previous_text=False if fast else config.ASR_CONDITION_ON_PREVIOUS,
             without_timestamps=True,
             initial_prompt=prompt,
+            no_speech_threshold=config.ASR_NO_SPEECH_THRESHOLD,
+            log_prob_threshold=config.ASR_LOG_PROB_THRESHOLD,
+            compression_ratio_threshold=config.ASR_COMPRESSION_RATIO_THRESHOLD,
         )
         text = "".join(segment.text for segment in segments).strip()
+        elapsed = time.perf_counter() - started
+
+    if not fast:
+        # Real-time factor of the final pass, measured on real audio. The UI
+        # needs it to tell the truth when a bigger model cannot keep up on a
+        # 4-core laptop, instead of the user guessing why captions lag.
+        duration = len(audio) / config.SAMPLE_RATE
+        if duration > 0:
+            _rtf_samples.append(elapsed / duration)
 
     return _clean(text)
 

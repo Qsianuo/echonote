@@ -23,8 +23,24 @@ from pathlib import Path
 PORT = "8131"
 
 
+def _run(exe: Path, args: list[str], timeout: float) -> subprocess.CompletedProcess:
+    """Run the frozen exe and decode its output deterministically.
+
+    ``text=True`` alone uses the runner's locale codec (cp1252 on a GitHub
+    runner), and the banner is UTF-8 — that raises UnicodeDecodeError instead
+    of failing the test it was meant to run.
+    """
+    return subprocess.run(
+        [str(exe), *args],
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+    )
+
+
 def run_self_test(exe: Path) -> None:
-    result = subprocess.run([str(exe), "--self-test"], capture_output=True, text=True, timeout=180)
+    result = _run(exe, ["--self-test"], timeout=180)
     print(result.stdout.strip())
     if result.returncode != 0:
         print(result.stderr[-2000:], file=sys.stderr)
@@ -38,12 +54,7 @@ def run_fetch_model_guard(exe: Path) -> None:
     lazily, so a missing hidden import would surface here) without touching
     the network.
     """
-    result = subprocess.run(
-        [str(exe), "--fetch-model", "__does_not_exist__"],
-        capture_output=True,
-        text=True,
-        timeout=180,
-    )
+    result = _run(exe, ["--fetch-model", "__does_not_exist__"], timeout=180)
     out = (result.stdout or "") + (result.stderr or "")
     if result.returncode != 2:
         print(out[-1500:], file=sys.stderr)

@@ -1,0 +1,81 @@
+name: release
+
+# Builds the portable Windows bundle and attaches it to a GitHub Release.
+# Trigger: push a tag like v0.9.0, or run manually from the Actions tab.
+#
+# The build itself lives in packaging/build.ps1 so that a local build and a
+# release build run identical steps (freeze -> smoke test -> zip).
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to attach the build to (e.g. v0.9.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  windows-bundle:
+    runs-on: windows-latest
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install runtime + packager
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller==6.22.3
+
+      - name: Verify the app imports before freezing
+        env:
+          ECHONOTE_SKIP_PRELOAD: "1"
+        run: python -c "from app.main import app; print(app.version)"
+
+      - name: Build, smoke test and zip
+        shell: pwsh
+        run: |
+          $tag = "${{ github.event.inputs.tag || github.ref_name }}"
+          $ver = $tag -replace '^v', ''
+          ./packaging/build.ps1 -Version $ver
+          "ASSET=EchoNote-v$ver-windows-x64.zip" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          files: ${{ env.ASSET }}
+          generate_release_notes: true
+          body: |
+            ## 下载后怎么用
+
+            1. 下载 `${{ env.ASSET }}`，解压到任意**可写目录**（例如 `D:\EchoNote`，不要放 `C:\Program Files`）
+            2. 双击 `EchoNote.exe`，会弹出一个命令行窗口
+            3. 模型加载完成后浏览器自动打开，点麦克风开始录音
+            4. 关闭命令行窗口即退出
+
+            **首次启动会下载约 464 MB 的识别模型**（只下一次，之后离线可用）。
+            国内网络慢就先双击 `start-mirror.bat`，走镜像下载。
+
+            排查环境问题：
+
+            ```
+            EchoNote.exe --self-test
+            ```
+
+            全程本地识别，音频不上传任何服务器。
+
+            > 这是 v0.9.0 技术预览版。延迟在 4 秒左右，尚未达到 v1.0 的发布门禁，
+            > 详见 README 的「延迟口径」一节。

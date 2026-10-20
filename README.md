@@ -8,7 +8,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![Whisper](https://img.shields.io/badge/faster--whisper-local%20STT-412991?style=flat-square&logo=openai&logoColor=white)](https://github.com/SYSTRAN/faster-whisper)
 [![License](https://img.shields.io/badge/License-MIT-64ffda?style=flat-square)](LICENSE)
-[![Stage](https://img.shields.io/badge/stage-v0.9.0%20tech%20preview-f0b429?style=flat-square)](#-发布状态)
+[![Stage](https://img.shields.io/badge/stage-v0.9.0%20tech%20preview-f0b429?style=flat-square)](#-延迟口径重要)
 
 边说边出字 · 录音不上传 · 安装后可离线 · 支持中英日韩等多语言
 
@@ -254,11 +254,12 @@ WebSocket ──▶ FastAPI（每连接一会话）
 echonote/
 ├── app/
 │   ├── __main__.py    # python -m app（含监听地址安全检查）
+│   ├── desktop.py     # 便携版入口：横幅、自动开浏览器、--self-test
 │   ├── main.py        # FastAPI、WebSocket 会话、协议 v2、并发与队列上限
 │   ├── protocol.py    # 协议 v2 消息构造与校验
 │   ├── stt.py         # faster-whisper 加载（可重试）与转写
 │   ├── vad.py         # 能量 VAD 自动断句
-│   └── config.py      # 环境变量配置
+│   └── config.py      # 环境变量配置（含 frozen 路径解析）
 ├── web/
 │   ├── index.html     # 界面
 │   ├── style.css      # 深色主题
@@ -266,6 +267,11 @@ echonote/
 │   ├── export.js      # TXT/MD/SRT 生成（纯函数，可测试）
 │   ├── wav.js         # WAV 编码（纯函数，可测试）
 │   └── pcm-worklet.js # 音频重采样 Worklet
+├── packaging/
+│   ├── echonote.spec  # PyInstaller 配置（收集原生 DLL 与 VAD 模型）
+│   ├── launch.py      # 打包入口
+│   ├── smoke_test.py  # 冻结产物冒烟测试
+│   └── build.ps1      # 本地与 CI 共用的构建脚本
 ├── tools/
 │   ├── preflight.py   # 启动前检查：模型缓存 / 网络
 │   └── wait_ready.py  # 等 /api/ready，就绪后再开浏览器

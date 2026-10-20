@@ -49,6 +49,18 @@ _ABS_PATH = re.compile(
 _QUERY = re.compile(r"\?[^\s\"']*")
 
 
+def _basename(path: str) -> str:
+    """Last path segment, for both separators, on every platform.
+
+    ``pathlib.Path(...).name`` is wrong here: on Linux a backslash is an
+    ordinary filename character, so ``Path("C:\\Users\\alice\\model.bin").name``
+    returns the whole string and the username leaks into the UI. That passed
+    on Windows and failed on Linux CI.
+    """
+    tail = re.split(r"[\\/]", path)
+    return tail[-1] if tail and tail[-1] else "…"
+
+
 def sanitize_error(message: object) -> str:
     """Make an exception message safe to show in the UI.
 
@@ -59,7 +71,7 @@ def sanitize_error(message: object) -> str:
     if not text:
         return "未知错误"
     text = _QUERY.sub("", text)
-    text = _ABS_PATH.sub(lambda match: Path(match.group(0)).name or "…", text)
+    text = _ABS_PATH.sub(lambda match: _basename(match.group(0)), text)
     text = " ".join(text.split())
     return text[:300]
 

@@ -1,0 +1,12 @@
+# Golden samples are compared byte for byte (tests/js/export.test.mjs). Git's
+# autocrlf would rewrite their line endings on checkout and break the
+# assertions on Windows CI, so they are marked binary-ish (-text).
+tests/fixtures/** -text
+docs/examples/** -text
+
+# Shell scripts keep LF so they still run under bash/WSL after a Windows clone.
+*.sh text eol=lf
+*.bat text eol=crlf
+
+*.png binary
+*.wav binary

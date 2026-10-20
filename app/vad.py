@@ -26,7 +26,9 @@ class Segmenter:
         self.sample_rate = sample_rate
         self.frame_size = int(sample_rate * FRAME_MS / 1000)
         self.base_threshold = threshold
+        # 650 ms / 30 ms -> 21 frames = 630 ms effective
         self.hangover_frames = max(1, int(hangover_ms / FRAME_MS))
+        # 280 ms / 30 ms -> 9 frames = 270 ms effective
         self.min_speech_frames = max(1, int(min_speech_ms / FRAME_MS))
         self.max_segment_frames = max(1, int(max_segment_s * 1000 / FRAME_MS))
 
@@ -72,6 +74,11 @@ class Segmenter:
         if len(audio) < self.sample_rate * 0.25:
             return None
         return audio
+
+    @property
+    def segment_start_s(self) -> float:
+        """Session-relative start of the in-progress utterance, in seconds."""
+        return self.segment_start_frame * FRAME_MS / 1000.0
 
     def flush(self) -> dict | None:
         """Finalize whatever is currently buffered (end of session)."""

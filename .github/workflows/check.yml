@@ -5,17 +5,52 @@ on:
   pull_request:
 
 jobs:
-  syntax:
-    runs-on: ubuntu-latest
+  test:
+    name: py${{ matrix.python }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      # NFR-CI-01: 3.10-3.13 on Linux plus one Windows run. 3.9 is
+      # intentionally absent (end of life, and app/stt.py needs 3.10 unions).
+      matrix:
+        os: [ubuntu-latest]
+        python: ["3.10", "3.11", "3.12", "3.13"]
+        include:
+          - os: windows-latest
+            python: "3.10"
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: ${{ matrix.python }}
 
-      - name: Python syntax check
-        run: python -m py_compile app/*.py tests/*.py
+      - name: Install test dependencies
+        run: |
+          python -m pip install -q --upgrade pip
+          python -m pip install -q -r requirements-dev.txt
+
+      - name: Byte-compile
+        run: python -m compileall -q app tests tools
+
+      - name: Unit / contract / integration tests
+        run: python -m pytest -q --cov=app --cov-report=term-missing
+
+      # NFR-CI-02 coverage gates.
+      - name: Coverage gate - vad >= 90%
+        run: coverage report --include="app/vad.py" --fail-under=90
+
+      - name: Coverage gate - stt >= 70%
+        run: coverage report --include="app/stt.py" --fail-under=70
+
+      - name: Coverage gate - main >= 60%
+        run: coverage report --include="app/main.py" --fail-under=60
+
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
@@ -24,4 +59,28 @@ jobs:
       - name: JavaScript syntax check
         run: |
           node --check web/app.js
+          node --check web/export.js
+          node --check web/wav.js
           node --check web/pcm-worklet.js
+
+      # RG-03 (WAV header) + RG-15 (export golden samples).
+      - name: Frontend unit tests
+        run: node --test tests/js/export.test.mjs tests/js/wav.test.mjs
+
+  runtime:
+    name: runtime imports
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install the real stack
+        run: |
+          python -m pip install -q --upgrade pip
+          python -m pip install -q -r requirements.txt
+
+      - name: Import server and engine with real dependencies
+        run: python -c "import app.main, app.stt; print(app.main.app.version)"

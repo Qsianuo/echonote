@@ -5,6 +5,13 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 
+# Tests
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
 # Whisper models (downloaded on first run)
 models/
 
@@ -15,6 +22,18 @@ tests/exports/
 *.webm
 *.mp3
 *.m4a
+
+# Packaging artifacts
+build/
+dist/
+EchoNote-*.zip
+*.spec.bak
+
+# Docs assets: audio samples are committed on purpose
+!docs/examples/*.wav
+
+# Throwaway capture dirs
+.shots/
 
 # Local config
 .env

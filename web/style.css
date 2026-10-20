@@ -23,6 +23,45 @@
   display: none !important;
 }
 
+/* ─────────────────────────── a11y primitives ─────────────────────────── */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: absolute;
+  left: 12px;
+  top: -60px;
+  z-index: 50;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--panel-solid);
+  border: 1px solid var(--border-strong);
+  color: var(--accent);
+  font-size: 13px;
+  transition: top 0.18s;
+}
+
+.skip-link:focus {
+  top: 12px;
+}
+
+/* A11Y-11: one visible focus ring for every interactive element. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
 html,
 body {
   margin: 0;
@@ -378,7 +417,7 @@ select {
   outline: none;
 }
 
-.field select:focus {
+.field select:focus-visible {
   border-color: var(--border-strong);
 }
 
@@ -398,6 +437,89 @@ select {
   background: rgba(100, 255, 218, 0.045);
   border: 1px dashed rgba(100, 255, 218, 0.16);
 }
+
+.model-notice {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.65;
+  color: var(--muted);
+}
+
+.model-notice code {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(100, 255, 218, 0.08);
+  color: var(--accent-dim);
+}
+
+/* ─────────────────────────── alerts / notices ─────────────────────────── */
+
+.alerts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 22px;
+}
+
+.alerts:not(:has(> :not([hidden]))) {
+  padding-bottom: 0;
+}
+
+.alert,
+.notice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.alert {
+  color: #ffc2cc;
+  background: rgba(255, 84, 112, 0.1);
+  border: 1px solid rgba(255, 84, 112, 0.35);
+}
+
+.notice {
+  color: #ffe0a3;
+  background: rgba(240, 180, 41, 0.08);
+  border: 1px solid rgba(240, 180, 41, 0.28);
+}
+
+.alert-link {
+  color: #ffc2cc;
+  text-decoration: underline;
+  font-size: 12px;
+}
+
+.alert-link:hover {
+  color: #fff;
+}
+
+.btn.tiny {
+  padding: 4px 10px;
+  font-size: 11.5px;
+  border-color: currentColor;
+  color: inherit;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.btn.danger {
+  color: #ffc2cc;
+  border-color: rgba(255, 84, 112, 0.45);
+}
+
+.btn.danger:hover:not(:disabled) {
+  color: #fff;
+  background: rgba(255, 84, 112, 0.18);
+  border-color: rgba(255, 84, 112, 0.7);
+}
+
 
 /* ─────────────────────────── transcript ─────────────────────────── */
 
@@ -530,13 +652,41 @@ select {
   color: var(--muted);
 }
 
+.finals {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.transcript:focus-visible {
+  outline-offset: -2px;
+}
+
 .segment {
   display: flex;
+  align-items: baseline;
   gap: 16px;
   padding: 12px 0;
   border-bottom: 1px dashed rgba(100, 255, 218, 0.07);
   animation: fade-in 0.28s ease;
 }
+
+.segment .badge {
+  flex: 0 0 auto;
+  align-self: center;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: #0b1a2b;
+  background: rgba(100, 255, 218, 0.82);
+  transition: opacity 0.6s ease;
+}
+
+.segment .badge.fade {
+  opacity: 0;
+}
+
 
 .segment:last-child {
   border-bottom: 0;
@@ -641,6 +791,54 @@ kbd {
   opacity: 0.4;
 }
 
+.menu button:focus-visible {
+  outline-offset: -2px;
+  background: rgba(100, 255, 218, 0.1);
+  color: var(--accent);
+}
+
+/* ─────────────────────────── dialog ─────────────────────────── */
+
+dialog {
+  width: calc(100vw - 40px);
+  max-width: 420px;
+  padding: 22px;
+  border-radius: 16px;
+  border: 1px solid var(--border-strong);
+  background: var(--panel-solid);
+  color: var(--text);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+}
+
+dialog::backdrop {
+  background: rgba(3, 8, 18, 0.66);
+}
+
+dialog h2 {
+  margin: 0 0 10px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+dialog p {
+  margin: 0 0 18px;
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--muted);
+}
+
+dialog p b {
+  color: #ffc2cc;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+
 /* ─────────────────────────── responsive ─────────────────────────── */
 
 @media (max-width: 940px) {
@@ -687,6 +885,14 @@ kbd {
 
   .transcript {
     padding: 6px 16px 16px;
+  }
+
+  .alerts {
+    padding: 0 16px;
+  }
+
+  .segment {
+    gap: 10px;
   }
 }
 

@@ -1,13 +1,90 @@
 """EchoNote configuration.
 
-All values can be overridden with environment variables.
+All values can be overridden with environment variables. Nothing here reads
+the network or the filesystem at import time (except a cheap ``is_file``
+probe for a locally cached model), so tests can import this module freely.
 """
 
+from __future__ import annotations
+
 import os
+import sys
 from pathlib import Path
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
-WEB_DIR = ROOT_DIR / "web"
+
+def is_frozen() -> bool:
+    """True when running from a PyInstaller build (see ``packaging/``)."""
+    return bool(getattr(sys, "frozen", False))
+
+
+def _bundle_dir() -> Path:
+    """Root of read-only resources shipped inside the build.
+
+    One-file builds unpack to ``sys._MEIPASS``; one-dir builds keep the
+    resources next to the executable, which is also what ``_MEIPASS`` points
+    at there. Falling back to the executable's folder keeps a third layout
+    (app/ next to the exe) working without a spec-file change.
+    """
+    if is_frozen():
+        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    return Path(__file__).resolve().parent.parent
+
+
+def _data_dir() -> Path:
+    """Writable root, next to the executable in a portable build.
+
+    Models must never land in ``_MEIPASS``: in a one-file build that folder is
+    a temp dir wiped on exit, so the 460 MB download would repeat on every
+    launch.
+    """
+    if is_frozen():
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent.parent
+
+
+# Read-only bundled assets (frontend).
+WEB_DIR = _bundle_dir() / "web"
+
+# Writable root: models/ and logs/ live here.
+ROOT_DIR = _data_dir()
+
+# --------------------------------------------------------------------------
+# Release identity
+#
+# The document version and the product version are intentionally separate:
+# PRD v1.1 describes the target product v1.0.0, while what can be shipped
+# today is the v0.9.0 tech preview. Every public surface (README, FastAPI
+# version, screenshots) must agree with APP_VERSION, never with the document.
+# --------------------------------------------------------------------------
+
+APP_VERSION = "0.9.0"
+APP_STAGE = "tech-preview"
+PROTOCOL_VERSION = "2"
+
+
+def _env_flag(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
 
 def _default_model() -> str:
     """Use a locally downloaded model directory when one is present.
@@ -21,7 +98,10 @@ def _default_model() -> str:
     return "small"
 
 
+# --------------------------------------------------------------------------
 # Speech recognition
+# --------------------------------------------------------------------------
+
 MODEL_NAME = os.getenv("ECHONOTE_MODEL") or _default_model()
 MODEL_DIR = os.getenv("ECHONOTE_MODEL_DIR", str(ROOT_DIR / "models"))
 LANGUAGE = os.getenv("ECHONOTE_LANGUAGE", "zh")
@@ -29,13 +109,70 @@ LANGUAGE = os.getenv("ECHONOTE_LANGUAGE", "zh")
 # Audio
 SAMPLE_RATE = 16000
 
-# Voice activity detection (energy based)
-VAD_THRESHOLD = float(os.getenv("ECHONOTE_VAD_THRESHOLD", "0.010"))
-VAD_HANGOVER_MS = int(os.getenv("ECHONOTE_VAD_HANGOVER_MS", "650"))
-VAD_MIN_SPEECH_MS = int(os.getenv("ECHONOTE_VAD_MIN_SPEECH_MS", "280"))
-VAD_MAX_SEGMENT_S = float(os.getenv("ECHONOTE_VAD_MAX_SEGMENT_S", "15"))
-PARTIAL_INTERVAL_S = float(os.getenv("ECHONOTE_PARTIAL_INTERVAL_S", "1.2"))
+# Voice activity detection (energy based).
+# NOTE: hangover/min-speech are expressed in milliseconds but consumed as
+# whole 30 ms frames, so the effective values are 630 ms and 270 ms.
+# See docs/consistency-checklist.md.
+VAD_THRESHOLD = _env_float("ECHONOTE_VAD_THRESHOLD", 0.010)
+VAD_HANGOVER_MS = _env_int("ECHONOTE_VAD_HANGOVER_MS", 650)
+VAD_MIN_SPEECH_MS = _env_int("ECHONOTE_VAD_MIN_SPEECH_MS", 280)
+VAD_MAX_SEGMENT_S = _env_float("ECHONOTE_VAD_MAX_SEGMENT_S", 15)
 
-# Server
+# Partial captions. This is a lower-bound throttle only; it is NOT a promise
+# to the user. The user-facing promise is the p95 in PRD FR-008 / RG-06.
+PARTIAL_INTERVAL_S = _env_float("ECHONOTE_PARTIAL_INTERVAL_S", 1.2)
+
+# --------------------------------------------------------------------------
+# Protocol limits (PRD §7.1, FR-038, D-06, D-12)
+# --------------------------------------------------------------------------
+
+# One upstream frame: >=100 ms of audio, <=32 KiB.
+MIN_FRAME_MS = 100
+MIN_FRAME_BYTES = int(SAMPLE_RATE * MIN_FRAME_MS / 1000) * 2  # 3200 B
+MAX_FRAME_BYTES = 32 * 1024
+
+# Server-side audio backlog cap: 60 s of audio, drop-oldest on overflow.
+AUDIO_QUEUE_MAX_SECONDS = 60.0
+AUDIO_QUEUE_MAX_FRAMES = int(AUDIO_QUEUE_MAX_SECONDS * 1000 / MIN_FRAME_MS)  # 600
+
+MAX_CONCURRENT_SESSIONS = 2
+BUSY_RETRY_AFTER_S = 10
+
+# How long a closed connection may keep the worker draining its tail.
+SESSION_TAIL_TIMEOUT_S = 30.0
+
+# Soft recording limit. 0 = unlimited (the UI must say so).
+MAX_RECORD_MINUTES = max(0, _env_int("ECHONOTE_MAX_RECORD_MINUTES", 90))
+MAX_RECORD_WARN_RATIO = 0.8
+
+# Load the model at startup. Tests set ECHONOTE_SKIP_PRELOAD=1 so the suite
+# never downloads a model.
+PRELOAD = not _env_flag("ECHONOTE_SKIP_PRELOAD")
+
+# Client-side memory budget for the in-flight recording (FR-045).
+RECORDING_MEMORY_BUDGET_BYTES = 200 * 1024 * 1024
+
+# --------------------------------------------------------------------------
+# Server / security
+# --------------------------------------------------------------------------
+
 HOST = os.getenv("ECHONOTE_HOST", "127.0.0.1")
-PORT = int(os.getenv("ECHONOTE_PORT", "8000"))
+PORT = _env_int("ECHONOTE_PORT", 8000)
+
+ALLOW_NONLOCAL = _env_flag("ECHONOTE_ALLOW_NONLOCAL")
+ACCESS_TOKEN = os.getenv("ECHONOTE_ACCESS_TOKEN", "").strip()
+ALLOWED_ORIGINS = frozenset(
+    item.strip().rstrip("/")
+    for item in os.getenv("ECHONOTE_ALLOWED_ORIGINS", "").split(",")
+    if item.strip()
+)
+
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "0:0:0:0:0:0:0:1"}
+
+
+def is_loopback(host: str) -> bool:
+    """True when ``host`` only accepts connections from this machine."""
+    value = (host or "").strip().lower()
+    if value in _LOOPBACK_HOSTS:
+        return True
+    return value.startswith("127.")

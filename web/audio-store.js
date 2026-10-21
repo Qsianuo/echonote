@@ -21,16 +21,12 @@
       const maxBytes = options.maxBytes;
 
       return {
+        // 只记账，永不拒收：预算超了也照收，避免静默截断录音。
         accept(chunk) {
           if (!(chunk instanceof Int16Array)) {
             throw new TypeError('PcmLedger.accept() expects an Int16Array');
           }
-          const add = chunk.length * 2;
-          if (bytes + add > maxBytes) {
-            return { accepted: false, droppedBytes: add };
-          }
-          bytes += add;
-          return { accepted: true, droppedBytes: 0 };
+          bytes += chunk.length * 2;
         },
 
         get byteLength() {

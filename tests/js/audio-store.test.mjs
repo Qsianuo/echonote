@@ -19,21 +19,20 @@ test('accept accumulates bytes as samples * 2', () => {
   assert.equal(l.sampleCount, 100);
 });
 
-test('rejects the chunk that would exceed maxBytes', () => {
+test('accepting past the budget still records every byte (永不截断录音)', () => {
   const l = Store.PcmLedger.create({ maxBytes: 300 });
-  assert.equal(l.accept(new Int16Array(100)).accepted, true);   // 200 B
-  const r = l.accept(new Int16Array(100));                      // 若接受则 400 B
-  assert.equal(r.accepted, false);
-  assert.equal(r.droppedBytes, 200);
-  assert.equal(l.byteLength, 200);
+  l.accept(new Int16Array(100));   // 200 B
+  l.accept(new Int16Array(100));   // 400 B，超出预算但必须照收
+  assert.equal(l.byteLength, 400);
+  assert.equal(l.overBudget, true);
 });
 
 test('overBudget flips exactly at the limit, not before', () => {
   const l = Store.PcmLedger.create({ maxBytes: 200 });
-  l.accept(new Int16Array(100));
+  l.accept(new Int16Array(100));   // 恰好 200 B
   assert.equal(l.overBudget, false);
-  l.accept(new Int16Array(100));   // 恰好 400 > 200
-  assert.equal(l.overBudget, false); // 被拒，仍未超
+  l.accept(new Int16Array(1));     // 202 B
+  assert.equal(l.overBudget, true);
 });
 
 test('reset clears accounting', () => {
@@ -52,6 +51,6 @@ test('rejects non-Int16Array input', () => {
 
 test('empty chunk is accepted and changes nothing', () => {
   const l = Store.PcmLedger.create({ maxBytes: 1000 });
-  assert.equal(l.accept(new Int16Array(0)).accepted, true);
+  l.accept(new Int16Array(0));
   assert.equal(l.byteLength, 0);
 });

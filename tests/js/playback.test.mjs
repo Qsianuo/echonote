@@ -54,3 +54,16 @@ test('windowFor always returns Int16-aligned offsets', () => {
   assert.equal(w.fromByte % 2, 0);
   assert.equal(w.toByte % 2, 0);
 });
+
+test('windowFor clamps past the end to an empty window', () => {
+  const w = P.windowFor({ positionS: 260, windowS: 30, sampleRate: 16000, totalBytes: 8000000 });
+  assert.equal(w.fromByte, 8000000);
+  assert.equal(w.toByte, 8000000);
+});
+
+test('windowFor keeps offsets aligned when totalBytes is odd', () => {
+  const w = P.windowFor({ positionS: 249, windowS: 30, sampleRate: 16000, totalBytes: 8000001 });
+  assert.equal(w.fromByte % 2, 0);
+  assert.equal(w.toByte % 2, 0);
+  assert.ok(w.toByte <= 8000001);
+});

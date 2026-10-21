@@ -44,3 +44,6 @@ Thumbs.db
 
 # Exported conversation logs (not part of the product)
 docs/session-context-*.md
+
+# superpowers SDD 工作区（计划/台账等临时产物）
+.superpowers/

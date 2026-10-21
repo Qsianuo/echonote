@@ -280,7 +280,17 @@ REFINE_DRAIN_MAX_S = _env_float("ECHONOTE_REFINE_DRAIN_MAX_S", 60.0)
 # Passed as ``hotwords``, not as part of the instruction prompt: hotwords bias
 # the token choice without the model being able to "answer" them, which is how
 # "回声笔记" survives a model that would otherwise write "回生笔记".
-HOTWORDS = os.getenv("ECHONOTE_HOTWORDS", "").strip() or None
+# A starter glossary, not a guess about the user's life: this is the app's own
+# name, the one word every first recording says.
+#
+# Deliberately *one* term. hotwords are a decoder prompt, and `tiny` continues
+# from them when the next spoken word does not match: with "回声笔记 语音识别"
+# it emitted "语音识别 课今天天气…" — a stray character, deterministically, on
+# every run. A term the user does not actually say makes the transcript worse,
+# so the default stays minimal and everything else comes from the user.
+DEFAULT_HOTWORDS = "回声笔记"
+
+HOTWORDS = os.getenv("ECHONOTE_HOTWORDS", DEFAULT_HOTWORDS).strip() or None
 
 # A glossary longer than this is a document, not a glossary; the decoder
 # prompt is a few hundred tokens at most.

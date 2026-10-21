@@ -405,6 +405,15 @@ select {
   letter-spacing: 0.06em;
 }
 
+/* A one-line explanation under a control; `.hint` is the centred status bar. */
+.field-note {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  font-style: normal;
+  letter-spacing: 0.02em;
+}
+
 .field select {
   appearance: none;
   padding: 10px 12px;

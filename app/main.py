@@ -212,6 +212,7 @@ def get_config() -> dict:
         "min_frame_ms": config.MIN_FRAME_MS,
         "max_frame_bytes": config.MAX_FRAME_BYTES,
         "queue_max_seconds": config.AUDIO_QUEUE_MAX_SECONDS,
+        "hotwords": config.HOTWORDS or "",
         "max_sessions": config.MAX_CONCURRENT_SESSIONS,
     }
 

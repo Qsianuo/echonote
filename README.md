@@ -218,7 +218,7 @@ python tools/fetch_model.py --list
 | `ECHONOTE_DISABLE_LIVE` | 未设置 | 设为 `1` 退回 v0.10 行为：没有增量字幕，每句结束才出文字 |
 | `ECHONOTE_LIVE_STEP_S` | `0.6` | 实时解码的**下限节流**：至少来了这么多新音频才解一次，不是承诺值 |
 | `ECHONOTE_DISABLE_REFINE` | 未设置 | 设为 `1` 关闭定稿精修，字幕只保留实时档的结果（更快，但准确率降一档） |
-| `ECHONOTE_HOTWORDS` | 空 | 专有名词表（空格分隔），用 `hotwords` 机制偏向解码，不会像 prompt 那样被复读 |
+| `ECHONOTE_HOTWORDS` | `回声笔记` | 专有名词表（空格分隔）。**只填你真正会说的词**：`tiny` 会从词表往下续写，填了不会出现的词反而会在句子里插字 |
 | `ECHONOTE_REFINE_BACKLOG_S` | `240` | 精修积压的音频秒数上限，超过才丢弃最旧的一条并提示 |
 | `ECHONOTE_REFINE_DRAIN_MAX_S` | `60` | 停止录音后等待精修完成的上限 |
 | `ECHONOTE_MAX_RECORD_MINUTES` | `90` | 录音时长软上限；`0` 表示不限（界面会提示内存风险自负） |

@@ -408,6 +408,14 @@
       state.modelName = modelDisplayName(config.model, config.model_label);
       el.modelTag.textContent = state.modelName;
       el.footerModel.textContent = state.modelName;
+
+      // The server ships a starter glossary (the app's own vocabulary). Use it
+      // until the user types their own, so a first run does not look like it
+      // has a broken glossary field.
+      if (el.hotwordsInput && !state.hotwords && config.hotwords) {
+        state.hotwords = String(config.hotwords);
+        el.hotwordsInput.value = state.hotwords;
+      }
       setOfflineBadge(config.offline_ready);
       if (el.versionTag && config.version) el.versionTag.textContent = `v${config.version}`;
 

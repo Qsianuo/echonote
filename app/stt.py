@@ -705,9 +705,30 @@ def _clean(text: str, prompt: str | None = None) -> str:
     # Whisper occasionally emits bracketed sound annotations; drop them.
     if text in ("[BLANK_AUDIO]", "(空白音频)", "[Silence]", "谢谢观看", "谢谢大家观看"):
         return ""
+    text = _collapse_repetition(text)
     if prompt:
         text = _strip_echo(text, prompt).strip()
     return text
+
+
+def _collapse_repetition(text: str) -> str:
+    """Collapse a decode that got stuck repeating one unit.
+
+    Measured, not hypothetical: `tiny` with a glossary that does not match the
+    audio produced "记记记记…" for 70 characters and "劇劇劇劇…" for 80, and the
+    caption grew without bound. faster-whisper's compression_ratio guard only
+    fires when a retry is available, and this decode path runs a single
+    temperature, so nothing else stopped it.
+
+    A unit repeated five or more times is a loop, not speech. Five, not four,
+    so that "哈哈哈哈" (four) survives as laughter while the measured 70-character
+    runs do not.
+    """
+    # Below five characters there is no room for five repeats, so the regex
+    # cannot fire anyway; skip it rather than pay for the scan.
+    if len(text) < 5:
+        return text
+    return re.sub(r"(.{1,8}?)(?:\1){4,}", r"\1", text)
 
 
 # Shortest run of the instruction that counts as an echo. "普通话录音" (5) is

@@ -500,3 +500,32 @@ def test_the_model_choice_survives_a_restart(tmp_path, monkeypatch):
     assert config._sticky_choice() == "tiny"
     config.remember_model(None)
     assert config._sticky_choice() is None
+
+
+def test_the_glossary_file_is_read_when_the_env_var_is_absent(tmp_path, monkeypatch):
+    """Domain knowledge belongs on disk, not inside the binary."""
+    (tmp_path / "hotwords.txt").write_text(
+        "# 注释\n焦距 光圈\n\n曝光\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(config, "MODEL_DIR", str(tmp_path))
+    monkeypatch.delenv("ECHONOTE_HOTWORDS", raising=False)
+    monkeypatch.setattr(config, "HOTWORDS", None)
+    assert config._glossary_file() == "焦距 光圈 曝光"
+    monkeypatch.setattr(config, "HOTWORDS", config._glossary_file())
+    assert stt.transcribe_live(np.zeros(16000, dtype=np.float32), "zh") == ""
+
+
+def test_a_decoding_loop_is_collapsed_to_one_unit():
+    """`tiny` with a mismatched glossary emitted 70 identical characters."""
+    text = "您好这是回生笔记" + "记" * 70 + "今天天气很好"
+    assert stt._collapse_repetition(text) == "您好这是回生笔记今天天气很好"
+
+
+def test_laughter_is_not_mistaken_for_a_loop():
+    # Four 哈 is written laughter; five identical units is a stuck decoder.
+    assert stt._collapse_repetition("哈哈哈哈") == "哈哈哈哈"
+    assert stt._collapse_repetition("哈哈哈哈哈哈") == "哈"
+
+
+def test_normal_text_is_untouched_by_the_loop_guard():
+    assert stt._collapse_repetition("你好,这是回声笔记。") == "你好,这是回声笔记。"

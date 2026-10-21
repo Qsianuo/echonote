@@ -290,7 +290,48 @@ REFINE_DRAIN_MAX_S = _env_float("ECHONOTE_REFINE_DRAIN_MAX_S", 60.0)
 # so the default stays minimal and everything else comes from the user.
 DEFAULT_HOTWORDS = "回声笔记"
 
-HOTWORDS = os.getenv("ECHONOTE_HOTWORDS", DEFAULT_HOTWORDS).strip() or None
+def _glossary_file() -> str | None:
+    """Read ``models/hotwords.txt`` if the user keeps one there.
+
+    A file beats a compiled-in default for the same reason the UI field beats
+    the env var: the glossary is domain knowledge, and domain knowledge does
+    not ship inside the binary. One term per line, ``#`` starts a comment.
+    """
+    path = Path(MODEL_DIR) / "hotwords.txt"
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    words: list[str] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        words.extend(line.split())
+    return " ".join(words) or None
+
+
+# Precedence: env var (operator) > hotwords.txt (this machine) > built-in.
+HOTWORDS = (
+    os.getenv("ECHONOTE_HOTWORDS", "").strip()
+    or _glossary_file()
+    or DEFAULT_HOTWORDS
+) or None
+
+# faster-whisper truncates hotwords to ``max_length // 2`` tokens (224 for the
+# multilingual tokenizer) and does it *silently*, so a long glossary loses its
+# tail with no visible symptom. Chinese is roughly one token per character plus
+# the separators, so ~200 characters is where the cut starts. Measured: 52
+# photography terms = 171 characters = 221 tokens.
+HOTWORDS_TOKEN_BUDGET = 224
+
+if HOTWORDS and len(HOTWORDS) > 200:
+    log.warning(
+        "词表 %d 个字符，超过 faster-whisper 的 %d token 上限，尾部会被静默丢弃；"
+        "请删到约 50 个词以内",
+        len(HOTWORDS),
+        HOTWORDS_TOKEN_BUDGET,
+    )
 
 # A glossary longer than this is a document, not a glossary; the decoder
 # prompt is a few hundred tokens at most.

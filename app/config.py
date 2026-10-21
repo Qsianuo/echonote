@@ -59,7 +59,7 @@ ROOT_DIR = _data_dir()
 # version, screenshots) must agree with APP_VERSION, never with the document.
 # --------------------------------------------------------------------------
 
-APP_VERSION = "0.10.0"
+APP_VERSION = "0.11.0"
 APP_STAGE = "tech-preview"
 PROTOCOL_VERSION = "2"
 
@@ -185,9 +185,42 @@ ASR_PROMPT_ZH = os.getenv(
     "以下是普通话录音，请使用简体中文和标点符号转写。",
 ).strip()
 
-# Partial captions. This is a lower-bound throttle only; it is NOT a promise
-# to the user. The user-facing promise is the p95 in PRD FR-008 / RG-06.
-PARTIAL_INTERVAL_S = _env_float("ECHONOTE_PARTIAL_INTERVAL_S", 1.2)
+# Partial captions.
+#
+# ``LIVE_STEP_S`` is how much *new* audio must arrive before the live caption
+# is decoded again. It is an audio gate, not a wall-clock throttle: on this
+# hardware one decode is the floor for latency, so asking for less audio than
+# one decode costs only makes the queue deeper, never faster.
+#
+# The value is a compromise. Too small and every decode redoes audio it
+# already covered (pure waste on a 4-core CPU); too large and the caption
+# updates in visible jumps.
+LIVE_STEP_S = _env_float("ECHONOTE_LIVE_STEP_S", 0.6)
+
+# Live captions decode the utterance *while it grows* instead of waiting for
+# the pause. Off restores the v0.10 behaviour (one decode per utterance).
+LIVE_CAPTIONS = not _env_flag("ECHONOTE_DISABLE_LIVE")
+
+# Which model produces the live caption. Empty means "the fastest installed
+# model that is still readable", resolved in ``stt.live_target``. A separate,
+# smaller live model is what makes captions appear in ~1 s instead of ~4 s;
+# the accurate model then re-decodes each finished utterance in the background.
+LIVE_MODEL = os.getenv("ECHONOTE_LIVE_MODEL", "").strip() or None
+
+# Refine a finished utterance with the accurate model (emits a ``refine``
+# message that replaces the provisional final). Only meaningful when the live
+# model and the final model differ.
+REFINE_FINALS = not _env_flag("ECHONOTE_DISABLE_REFINE")
+
+# How many finished utterances may wait for their accurate pass. Measured on
+# the 4-core target: the accurate pass takes ~4-6 s, one utterance arrives
+# every ~5 s, so a depth of three rides out a burst without holding more than
+# a few MB of audio (each entry is at most 30 s of float32).
+REFINE_QUEUE_MAX = max(1, _env_int("ECHONOTE_REFINE_QUEUE_MAX", 3))
+
+# Upper bound on how long a closing session waits for pending refinements
+# before it says "done". Anything still queued keeps its provisional text.
+REFINE_DRAIN_TIMEOUT_S = _env_float("ECHONOTE_REFINE_DRAIN_TIMEOUT_S", 12.0)
 
 # --------------------------------------------------------------------------
 # Protocol limits (PRD §7.1, FR-038, D-06, D-12)

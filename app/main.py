@@ -25,6 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import config, models, protocol, stt
+from .live import LiveCaptioner
 from .vad import Segmenter
 
 logging.basicConfig(
@@ -186,6 +187,7 @@ def switch_model(payload: dict) -> dict:
 @app.get("/api/config")
 def get_config() -> dict:
     target = config.model_target()
+    live = stt.live_target()
     return {
         "version": config.APP_VERSION,
         "stage": config.APP_STAGE,
@@ -198,7 +200,13 @@ def get_config() -> dict:
         "sample_rate": config.SAMPLE_RATE,
         "language": config.LANGUAGE,
         "languages": LANGUAGES,
-        "partial_interval": config.PARTIAL_INTERVAL_S,
+        "live_step_s": config.LIVE_STEP_S,
+        "live_captions": config.LIVE_CAPTIONS,
+        "live_model": live.loader_value,
+        "live_model_key": live.key,
+        "live_model_label": live.label,
+        "live_separate": stt.live_is_separate(),
+        "refine": stt.refine_enabled(),
         "max_record_minutes": config.MAX_RECORD_MINUTES,
         "memory_budget_bytes": config.RECORDING_MEMORY_BUDGET_BYTES,
         "min_frame_ms": config.MIN_FRAME_MS,
@@ -216,7 +224,20 @@ FLUSH = object()  # sentinel: transcribe whatever is buffered, keep the session 
 
 
 class StreamingSession:
-    """One WebSocket connection = one recording session."""
+    """One WebSocket connection = one recording session.
+
+    Three threads, each with a single job:
+
+    * ``_run`` — the VAD. Owns segmentation and the transcript timeline.
+    * ``LiveCaptioner`` — decodes the utterance while it grows (``partial``).
+    * ``_refine_loop`` — re-decodes finished utterances with the accurate
+      model and replaces the provisional text (``refine``).
+
+    They exist separately because their costs differ by an order of
+    magnitude: 0.9 s for a live decode, ~4 s for an accurate one on the
+    4-core target. Sharing one thread made the accurate pass starve the live
+    caption, which is precisely the "说一句等十几秒" complaint.
+    """
 
     def __init__(self, loop: asyncio.AbstractEventLoop, session_id: int) -> None:
         self.loop = loop
@@ -233,13 +254,43 @@ class StreamingSession:
         self._last_partial = ""
         self._dropped_samples = 0
         self._warned_backlog = False
+
+        self._live: LiveCaptioner | None = None
+        if config.LIVE_CAPTIONS:
+            self._live = LiveCaptioner(
+                transcribe=self._decode_live,
+                emit=self._emit_partial,
+                epoch=lambda: self.epoch,
+            )
+
+        # Refinement queue is deliberately tiny: it is a background nicety,
+        # and an unbounded one would let a slow accurate model fall hours
+        # behind a meeting while holding every utterance's audio in memory.
+        self._refine: queue.Queue = queue.Queue(maxsize=config.REFINE_QUEUE_MAX)
+        self._refine_pending = 0
+        self._refine_lock = threading.Lock()
+        self._refine_dropped = 0
+        self._warned_refine = False
+        # Foreground state the refinement thread yields to. Two decodes of
+        # different sizes sharing four cores is what turned a 0.9 s tail
+        # decode into 3.9 s; refinement therefore only *starts* while the user
+        # is silent and no final is in flight.
+        self._speaking = False
+        self._foreground = False
+
         self._thread = threading.Thread(
             target=self._run, name=f"stt-session-{session_id}", daemon=True
+        )
+        self._refine_thread = threading.Thread(
+            target=self._refine_loop, name=f"refine-{session_id}", daemon=True
         )
 
     # ------------------------------------------------------------- control
 
     def start(self) -> None:
+        if self._live is not None:
+            self._live.start()
+        self._refine_thread.start()
         self._thread.start()
 
     def push(self, samples: np.ndarray) -> None:
@@ -305,11 +356,24 @@ class StreamingSession:
             except (TypeError, ValueError):
                 pass
 
+    # ------------------------------------------------------------- decoding
+
+    def _decode_live(self, audio: np.ndarray) -> str:
+        """One live caption decode (runs on the caption thread)."""
+        return stt.transcribe_live(audio, self.language)
+
+    def _decode_final(self, audio: np.ndarray) -> str:
+        return stt.transcribe(audio, self.language)
+
+    def _emit_partial(self, text: str, start_s: float) -> None:
+        self._last_partial = text
+        self._emit(protocol.partial(text=text, epoch=self.epoch, start=start_s))
+
     # ------------------------------------------------------------- worker
 
     def _run(self) -> None:
         segmenter = Segmenter()
-        next_partial_at = 0.0
+        in_utterance = False
         try:
             while True:
                 try:
@@ -325,68 +389,156 @@ class StreamingSession:
                 if chunk is FLUSH:
                     tail = segmenter.flush()
                     if tail is not None:
-                        self._finalize(tail)
+                        self._complete(tail)
+                    in_utterance = False
+                    self._speaking = False
                     self._last_partial = ""
                     # Make sure a stale partial line disappears in the UI.
                     self._emit(protocol.partial(text="", epoch=self.epoch, start=0.0))
-                    next_partial_at = time.monotonic() + config.PARTIAL_INTERVAL_S
                     continue
 
-                for event in segmenter.push(chunk):
-                    self._finalize(event)
+                events = segmenter.push(chunk)
+                for event in events:
+                    self._complete(event)
+                if events:
+                    # The segmenter closed the utterance (pause or 30 s cap).
+                    in_utterance = False
 
-                # Partial captions must not starve while audio keeps arriving
-                # (the v1.0 queue-empty gate did exactly that). Throttle from
-                # the *end* of inference so the interval is meaningful.
-                now = time.monotonic()
-                if now >= next_partial_at and segmenter.in_speech:
-                    audio = segmenter.current_audio()
-                    if audio is not None:
-                        try:
-                            text = stt.transcribe(audio, self.language, fast=True)
-                        except Exception:  # noqa: BLE001 - never kill the stream
-                            log.exception("Partial transcription failed")
-                            text = ""
-                        next_partial_at = time.monotonic() + config.PARTIAL_INTERVAL_S
-                        if text and text != self._last_partial:
-                            self._last_partial = text
-                            self._emit(
-                                protocol.partial(
-                                    text=text,
-                                    epoch=self.epoch,
-                                    start=segmenter.segment_start_s,
-                                )
-                            )
+                if self._live is not None and segmenter.in_speech:
+                    if in_utterance:
+                        self._live.feed(chunk)
+                    else:
+                        seed = segmenter.current_audio()
+                        if seed is not None:
+                            self._live.begin(seed, segmenter.segment_start_s)
+                            in_utterance = True
+                self._speaking = bool(segmenter.in_speech)
 
             tail = segmenter.flush()
             if tail is not None:
-                self._finalize(tail)
+                self._complete(tail)
         except Exception:  # pragma: no cover - defensive
             log.exception("Session %s worker crashed", self.id)
         finally:
             self._maybe_warn_backlog()
+            self._speaking = False
+            if self._live is not None:
+                self._live.stop()
+            # Finals still waiting for their accurate pass: give them a
+            # bounded chance to land, because a dropped refinement means the
+            # exported text silently stays at live-model quality.
+            self._drain_refine(config.REFINE_DRAIN_TIMEOUT_S)
             self._emit(protocol.done())
             self._done.set()
 
-    def _finalize(self, event: dict) -> None:
+    def _complete(self, event: dict) -> None:
+        """Turn one finished utterance into a ``final`` (+ a refinement)."""
+        audio = event["audio"]
+        start, end = event["start"], event["end"]
+        self._foreground = True
         try:
-            text = stt.transcribe(event["audio"], self.language)
+            if self._live is not None:
+                # The caption thread has been decoding all along; this either
+                # reuses that result or pays for one last decode of the tail.
+                text = self._live.finish(audio, end - start)
+            else:
+                text = self._decode_final(audio)
         except Exception:  # noqa: BLE001 - one bad segment must not end the session
             log.exception("Final transcription failed")
             return
+        finally:
+            self._foreground = False
+
+        text = (text or "").strip()
         if not text:
             return
+
         self._final_seq += 1
+        final_id = f"{self.epoch}-{self._final_seq}"
         self._last_partial = ""
+        stable = not stt.refine_enabled()
         self._emit(
             protocol.final(
-                final_id=f"{self.epoch}-{self._final_seq}",
+                final_id=final_id,
                 epoch=self.epoch,
                 text=text,
-                start=event["start"],
-                end=event["end"],
+                start=start,
+                end=end,
+                stable=stable,
             )
         )
+        if not stable:
+            self._enqueue_refine(final_id, audio, start, end)
+
+    # ------------------------------------------------------------- refine
+
+    def _enqueue_refine(self, final_id: str, audio: np.ndarray, start: float, end: float) -> None:
+        with self._refine_lock:
+            while True:
+                try:
+                    self._refine.put_nowait((final_id, audio, start, end))
+                    self._refine_pending += 1
+                    return
+                except queue.Full:
+                    try:
+                        self._refine.get_nowait()
+                        self._refine.task_done()
+                    except queue.Empty:
+                        pass
+                    self._refine_pending = max(0, self._refine_pending - 1)
+                    self._refine_dropped += 1
+                    if not self._warned_refine:
+                        self._warned_refine = True
+                        log.warning(
+                            "Session %s refinement backlog full; dropping the oldest",
+                            self.id,
+                        )
+                        self._emit(
+                            protocol.warning(code="refine_backlog_dropped", dropped_ms=0)
+                        )
+
+    def _refine_loop(self) -> None:
+        while True:
+            job = self._refine.get()
+            if job is None:
+                return
+            # Yield to anything the user is waiting for: a decode that shares
+            # four cores with the live caption makes both of them late.
+            while not self._stop.is_set() and (self._speaking or self._foreground):
+                time.sleep(0.05)
+            final_id, audio, start, end = job
+            try:
+                text = self._decode_final(audio)
+            except Exception:  # noqa: BLE001 - provisional text stays valid
+                log.exception("Refine decode failed")
+                text = ""
+            finally:
+                with self._refine_lock:
+                    self._refine_pending = max(0, self._refine_pending - 1)
+                self._refine.task_done()
+            text = (text or "").strip()
+            if not text:
+                continue
+            try:
+                epoch = int(final_id.split("-")[0])
+            except ValueError:
+                epoch = self.epoch
+            self._emit(
+                protocol.refine(
+                    final_id=final_id, epoch=epoch, text=text, start=start, end=end
+                )
+            )
+
+    def _drain_refine(self, timeout: float) -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            with self._refine_lock:
+                if self._refine_pending <= 0:
+                    break
+            time.sleep(0.05)
+        # Stop the thread; anything still queued after the deadline keeps the
+        # provisional text, which is exactly what `stable: false` promised.
+        self._refine.put(None)
 
     def _emit(self, message: dict) -> None:
         protocol.validate(message)

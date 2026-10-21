@@ -5,7 +5,7 @@ This is a thin CLI over :func:`app.fetch.download`. It is the only entry point
 a user needs before going offline:
 
     python tools/fetch_model.py --list
-    python tools/fetch_model.py                      # default quality model
+    python tools/fetch_model.py                      # default pair (live + final)
     python tools/fetch_model.py --model medium
     python tools/fetch_model.py --all
 
@@ -27,7 +27,12 @@ from app import fetch, models  # noqa: E402
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Download an EchoNote model")
-    parser.add_argument("--model", default=models.DEFAULT_KEY, help="catalog key")
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="catalog key (default: the pair the app runs on — a fast live "
+        "model plus the default final model)",
+    )
     parser.add_argument("--all", action="store_true", help="fetch every catalog entry")
     parser.add_argument(
         "--model-dir",
@@ -44,23 +49,31 @@ def main(argv: list[str] | None = None) -> int:
         print(f"models in {model_dir}")
         for spec in models.CATALOG:
             present = models.is_complete(models.local_dir(model_dir, spec))
-            mark = "*" if spec.key == models.DEFAULT_KEY else " "
+            mark = "*" if spec.key in models.default_pair() else " "
             print(
                 f" {mark} {spec.key:<14} {spec.label:<6} {fetch.human(spec.size_mb):>8}  "
                 f"{'present' if present else '-':<8} {spec.note}"
             )
-        print("\n* = default. Pass --model <key> to fetch another one.")
+        print(
+            "\n* = part of the default pair (live caption model + final model)."
+            " Pass --model <key> to fetch one specific model."
+        )
         return 0
 
     if args.all:
         specs = list(models.CATALOG)
+    elif args.model is None:
+        # v0.11 runs two models: a small one for the live caption and the
+        # default one for the accurate pass. Fetching only the default would
+        # silently degrade live captions to the accurate model's speed, which
+        # is the exact complaint this release fixes.
+        specs = [models.BY_KEY[key] for key in models.default_pair()]
     elif args.model in models.BY_KEY:
         specs = [models.BY_KEY[args.model]]
     else:
         print(f"unknown model {args.model!r}; try --list")
         return 2
 
-    spec = specs[0]
     fetch.prepare_env(args.endpoint)
     model_dir.mkdir(parents=True, exist_ok=True)
 

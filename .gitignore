@@ -41,3 +41,6 @@ EchoNote-*.zip
 # OS
 .DS_Store
 Thumbs.db
+
+# Exported conversation logs (not part of the product)
+docs/session-context-*.md

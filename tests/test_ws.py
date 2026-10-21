@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from app import config, main, stt
+from app import config, main, protocol, stt
 from conftest import FRAME, speech
 
 
@@ -39,6 +39,14 @@ def fake_stt(monkeypatch):
     monkeypatch.setattr(
         stt, "transcribe", lambda audio, language=None, fast=False: "测试字幕"
     )
+    # v3 decodes the growing utterance on a second thread; without this the
+    # live caption returns "" and the utterance never becomes a final.
+    monkeypatch.setattr(
+        stt, "transcribe_live", lambda audio, language=None: "测试字幕"
+    )
+    # Keep refinement off in the suite: it would add a second decode and a
+    # `refine` message that most assertions here do not expect.
+    monkeypatch.setattr(stt, "refine_enabled", lambda: False)
 
 
 def send_speech(ws, seconds: float = 1.0) -> None:
@@ -55,11 +63,11 @@ def receive_until(ws, kind: str, limit: int = 30) -> dict:
     raise AssertionError(f"no {kind} message within {limit} frames")
 
 
-def test_handshake_announces_protocol_v2(client):
+def test_handshake_announces_the_current_protocol(client):
     with client.websocket_connect("/ws") as ws:
         message = ws.receive_json()
         assert message["type"] == "status"
-        assert message["protocol"] == "2"
+        assert message["protocol"] == protocol.PROTOCOL_VERSION
         assert "ready" in message and "retrying" in message
 
 
@@ -68,7 +76,7 @@ def test_final_carries_the_client_epoch(client, fake_stt):
         ws.receive_json()
         ws.send_text(
             json.dumps(
-                {"type": "config", "protocol": "2", "language": "zh", "epoch": 2, "origin_ms": 25000}
+                {"type": "config", "protocol": protocol.PROTOCOL_VERSION, "language": "zh", "epoch": 2, "origin_ms": 25000}
             )
         )
         send_speech(ws, 1.0)
@@ -85,12 +93,12 @@ def test_final_carries_the_client_epoch(client, fake_stt):
 def test_new_epoch_keeps_ids_unique(client, fake_stt):
     with client.websocket_connect("/ws") as ws:
         ws.receive_json()
-        ws.send_text(json.dumps({"type": "config", "protocol": "2", "epoch": 3, "origin_ms": 0}))
+        ws.send_text(json.dumps({"type": "config", "protocol": protocol.PROTOCOL_VERSION, "epoch": 3, "origin_ms": 0}))
         send_speech(ws, 1.0)
         ws.send_text(json.dumps({"type": "flush"}))
         first = receive_until(ws, "final")
 
-        ws.send_text(json.dumps({"type": "config", "protocol": "2", "epoch": 4, "origin_ms": 30000}))
+        ws.send_text(json.dumps({"type": "config", "protocol": protocol.PROTOCOL_VERSION, "epoch": 4, "origin_ms": 30000}))
         send_speech(ws, 1.0)
         ws.send_text(json.dumps({"type": "flush"}))
         second = receive_until(ws, "final")
@@ -139,3 +147,29 @@ def test_unsupported_protocol_is_reported(client, fake_stt):
         message = ws.receive_json()
         assert message["type"] == "error"
         assert message["code"] == "unsupported_protocol"
+
+
+def test_refine_replaces_the_provisional_final(client, monkeypatch):
+    """v3: the live model's final is provisional; the accurate pass rewrites it."""
+    monkeypatch.setattr(stt, "is_ready", lambda: True)
+    monkeypatch.setattr(stt, "transcribe_live", lambda audio, language=None: "实时字幕")
+    monkeypatch.setattr(
+        stt, "transcribe", lambda audio, language=None, fast=False: "精修字幕"
+    )
+    monkeypatch.setattr(stt, "refine_enabled", lambda: True)
+
+    with client.websocket_connect("/ws") as ws:
+        ws.receive_json()
+        send_speech(ws, 1.0)
+        ws.send_text(json.dumps({"type": "flush"}))
+
+        final = receive_until(ws, "final")
+        assert final["text"] == "实时字幕"
+        assert final["stable"] is False
+
+        refined = receive_until(ws, "refine")
+        assert refined["id"] == final["id"]
+        assert refined["epoch"] == final["epoch"]
+        assert refined["text"] == "精修字幕"
+        # Same timeline: a refinement may not move the caption.
+        assert (refined["start"], refined["end"]) == (final["start"], final["end"])

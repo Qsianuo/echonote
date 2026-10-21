@@ -370,3 +370,51 @@ def test_offline_missing_model_does_not_auto_retry(monkeypatch, tmp_path, whispe
     while stt._attempts == attempts_before and time.monotonic() < deadline:
         time.sleep(0.01)
     assert stt._attempts > attempts_before
+
+
+# --------------------------------------------------------------------------
+# v3: prompt echo and the live decode path
+# --------------------------------------------------------------------------
+
+
+def test_prompt_echo_is_stripped_from_a_short_hypothesis():
+    prompt = "以下是普通话录音，请使用简体中文和标点符号转写。"
+    assert stt._clean(prompt, prompt) == ""
+    assert stt._clean("以下是普通话录音，请使用简体中文和标点符号转写。你好", prompt) == "你好"
+    # A genuine opening that merely shares the first characters is untouched.
+    assert stt._clean("今天的会议开始", prompt) == "今天的会议开始"
+
+
+def test_strip_echo_ignores_short_overlaps():
+    # "以下" alone is too short to be an echo; dropping it would eat speech.
+    assert stt._strip_echo("以下三点", "以下是普通话录音") == "以下三点"
+
+
+def test_live_transcribe_returns_empty_without_a_model(monkeypatch):
+    monkeypatch.setattr(stt, "_live_model", None)
+    monkeypatch.setattr(stt, "_model", None)
+    assert stt.transcribe_live(np.zeros(16000, dtype=np.float32), "zh") == ""
+
+
+def test_live_target_prefers_the_fastest_readable_model(tmp_path, monkeypatch):
+    for name in ("faster-whisper-base", "faster-whisper-small"):
+        folder = tmp_path / name
+        folder.mkdir()
+        (folder / "model.bin").write_bytes(b"0" * (2 << 20))
+        (folder / "config.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(config, "MODEL_DIR", str(tmp_path))
+    monkeypatch.setattr(config, "MODEL_CHOICE", None)
+    monkeypatch.setattr(config, "LIVE_MODEL", None)
+    assert stt.live_target().key == "base"
+
+
+def test_live_target_falls_back_to_the_main_model(tmp_path, monkeypatch):
+    folder = tmp_path / "faster-whisper-medium"
+    folder.mkdir()
+    (folder / "model.bin").write_bytes(b"0" * (2 << 20))
+    (folder / "config.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(config, "MODEL_DIR", str(tmp_path))
+    monkeypatch.setattr(config, "MODEL_CHOICE", None)
+    monkeypatch.setattr(config, "LIVE_MODEL", None)
+    assert stt.live_target().key == "medium"
+    assert stt.live_is_separate() is False

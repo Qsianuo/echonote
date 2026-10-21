@@ -48,13 +48,13 @@ def test_available_is_ordered_by_quality(tmp_path: Path):
     assert keys == ["large-v3-turbo", "small"]
 
 
-def test_resolve_picks_the_best_local_model(tmp_path: Path):
+def test_resolve_picks_the_declared_default_when_installed(tmp_path: Path):
     make_model(tmp_path, "faster-whisper-small")
     make_model(tmp_path, "faster-whisper-medium")
     target = models.resolve(tmp_path)
-    assert target.key == "medium"
+    assert target.key == "small"
     assert target.source == "local"
-    assert target.path == str(tmp_path / "faster-whisper-medium")
+    assert target.path == str(tmp_path / "faster-whisper-small")
     assert target.ready_offline is True
 
 
@@ -62,13 +62,13 @@ def test_the_declared_default_wins_when_installed(tmp_path: Path):
     """The default is a product decision, not something a heuristic overrides."""
     make_model(tmp_path, "faster-whisper-large-v3-turbo")
     make_model(tmp_path, "faster-whisper-small")
-    assert models.resolve(tmp_path).key == "large-v3-turbo"
+    assert models.resolve(tmp_path).key == "small"
 
 
 def test_best_realtime_model_is_chosen_when_the_default_is_absent(tmp_path: Path):
-    """No turbo on disk: prefer a balanced model over the fast-but-worse one."""
-    make_model(tmp_path, "faster-whisper-small")
+    """No small on disk: prefer a realtime tier over a quality-only one."""
     make_model(tmp_path, "faster-whisper-medium")
+    make_model(tmp_path, "faster-whisper-large-v3")
     assert models.resolve(tmp_path).key == "medium"
 
 

@@ -8,7 +8,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![Whisper](https://img.shields.io/badge/faster--whisper-local%20STT-412991?style=flat-square&logo=openai&logoColor=white)](https://github.com/SYSTRAN/faster-whisper)
 [![License](https://img.shields.io/badge/License-MIT-64ffda?style=flat-square)](LICENSE)
-[![Stage](https://img.shields.io/badge/stage-v0.10.0%20tech%20preview-f0b429?style=flat-square)](#-延迟口径重要)
+[![Stage](https://img.shields.io/badge/stage-v0.11.0%20tech%20preview-f0b429?style=flat-square)](#-延迟口径重要)
 
 边说边出字 · 录音不上传 · 装好模型后完全离线 · 支持中英日韩等多语言
 
@@ -16,8 +16,8 @@
 
 ---
 
-> **这是 v0.10.0 技术预览（tech preview），不是 v1.0.0。**
-> 三件事需要先说清楚：**实验性**；**延迟取决于硬件与所选模型**（见下文的口径，尚未达标）；**默认模型比 v0.9 更大**，首次准备需要一次性下载，之后可完全断网运行。
+> **这是 v0.11.0 技术预览（tech preview），不是 v1.0.0。**
+> 三件事需要先说清楚：**实验性**；**延迟取决于硬件**（本机实测首字 2.8 s、停顿后 1 s 内定稿，见下文口径）；**首次准备要下载两个模型**（464 MB + 145 MB），之后可完全断网运行。
 
 ---
 
@@ -26,7 +26,7 @@
 - 🎙 **一键录音** —— 浏览器麦克风采集，16 kHz 单声道 PCM
 - ⚡ **实时转写** —— 边说边出字，停顿后自动断句
 - 🔒 **完全本地** —— 语音识别使用本地 faster-whisper 模型，音频不上传任何服务器
-- 🧠 **默认可选模型** —— 高精度档用 `large-v3-turbo`，「实时」→「实时」这类同音错字会明显减少；界面里可随时切到「快速」档
+- ⚡ **边说边出字** —— 两个模型分工：`base` 边说边画实时字幕，`small` 在每句结束后重写定稿；界面里可随时切换档位
 - 🔌 **真正离线** —— 模型在磁盘上时，识别全程零联网；`--offline` 还能强制断网启动
 - 🌍 **多语言** —— 中文 / 英文 / 日文 / 韩文 / 法文 / 德文 / 西班牙文 / 俄文，可自动识别
 - 📝 **四种导出** —— TXT 文本、Markdown 笔记、SRT 字幕、WAV 原始录音
@@ -36,7 +36,8 @@
 
 ![EchoNote 界面](docs/screenshot.png)
 
-> 截图取自 v0.10.0 打包版实际运行（离线模式 + `large-v3-turbo` + 8.95 s 中文样例音频）。全套流程见
+> 截图取自 v0.10.0 打包版实际运行（离线模式 + 8.95 s 中文样例音频）。v0.11 的界面在模型标签上显示「实时 极速 · 定稿 快速」，
+> 并为定稿过程加了「精修中 / 已精修」标记。全套流程见
 > `docs/screenshots/`：空态 → 录音中 → 停止后字幕 → 导出菜单 → 窄屏。
 > 该次录音导出的四种文件在 `docs/examples/`。
 
@@ -48,7 +49,7 @@
 `EchoNote-*-windows-x64.zip`，解压后双击 `EchoNote.exe` 即可。
 
 1. 解压到**任意可写目录**（例如 `D:\EchoNote`），不要放 `C:\Program Files`
-2. 双击 **`fetch-model.bat`** 准备模型（默认高精度档，约 1.6 GB，自动走国内镜像）
+2. 双击 **`fetch-model.bat`** 准备模型（实时字幕 145 MB + 定稿 464 MB，自动走国内镜像）
 3. 双击 `EchoNote.exe`，模型就绪后浏览器自动打开，点麦克风开始录音
 4. 关闭命令行窗口即退出
 
@@ -132,30 +133,31 @@ python packaging/smoke_test.py dist/EchoNote/EchoNote.exe
 
 ## ⚡ 延迟口径（重要）
 
-两个反直觉的实测结论，都影响你怎么选模型：
+**① 每次调用的成本几乎是常数。** Whisper 会把音频补齐到 30 s 再编码，所以一次 `transcribe()` 的耗时与音频长短关系很小。开发机（i5-8300H，4 核 8 线程，纯 CPU int8）上 `base` 每次调用 1.0–1.4 s，`small` 约 1.1 s（9 s 音频）/ 1.2 s（1.5 s 音频）。
 
-**① 耗时几乎全在编码器，解码参数救不回来。** 同一段音频、同一个模型，`beam_size=1` 与 `beam_size=5`、有无温度回退，耗时差异都在 7% 以内（噪声量级）。
+**② 所以「切碎了喂」是最差的做法。** v0.10 用 `large-v3-turbo` 把录音切成 3 s 一句、每句调一次，固定开销叠了十几倍，实测 RTF 3.9 —— 说一句要等十几秒。
 
-**② 句子越短，单位时间越亏。** Whisper 每次调用都会把音频补齐到 30 s 再编码，所以一次调用的成本几乎是常数。同一段 8.95 s 语音：
+v0.11 换掉的就是这个结构：**VAD 只负责判断「有人在说话」，音频连续流入一个增长中的缓冲**，实时字幕按增量解码，句子结束再定稿。
 
-| 切法 | 音频长度 | 转写耗时 | 折算 RTF |
-|---|---|---|---|
-| 真实录音（VAD 切成 3 句） | 每句 ~3 s | 每句 ~12 s | **3.9**（服务端实测） |
-| 整段喂进去 | 8.95 s | 13.4 s | **1.50** |
+| 环节 | 用什么模型 | 本机实测 |
+|---|---|---|
+| 首条字幕出现 | `base`（极速，145 MB） | **2.8–3.0 s**（首帧起算，含 VAD 起步 2 s 缓冲） |
+| 说话过程中刷新 | `base` | 每 ~0.7–1.4 s 一次，逐字追加 |
+| 停顿后定稿 | `small`（快速，464 MB） | **0.0–1.0 s** |
+| 定稿精修 | `small` | 2.5–6.9 s（后台，不挡字幕） |
 
-开发机（i5-8300H，4 核 8 线程，纯 CPU int8）实测：
+对比 v0.10 同一段 8.95 s 音频、同一台机器：首条字幕 **8.25 s → 2.8 s**，停顿后定稿 **2.2 s → 1.0 s**。
 
-| 模型 | 整段 RTF（9 s） | 整段 RTF（30 s） | 真实 3 s 句子 | CER |
-|---|---|---|---|---|
-| `small` | 0.41 | 0.19 | ~1.2 | 17.2% |
-| `medium` | 1.08 | 0.54 | 未单独实测 | 13.8% |
-| `large-v3-turbo` | 1.50 | 0.50 | **3.9** | 13.8% |
+几个刻意的取舍，都写在代码注释里，这里只列结论：
 
-**结论：4 核机器上用高精度档，字幕会明显落后于说话。** 想要接近实时就切「快速」档；8 核以上再考虑常开高精度。
+- **首条字幕要等 2 s 缓冲**，不是 1 s。1.2 s 缓冲时 `base` 会把「你好，这是回声笔记」读成「以后，这是」—— 少等 1 s，用户先看到一句错话。
+- **置信度门限是量出来的**（`LIVE_MIN_LOGPROB = -1.2`）。1.2–2.0 s 缓冲的真实读数落在 −1.09 ~ −0.33，最初拍的 −0.85 把正确字幕全丢了。
+- **短缓冲会被丢弃**：句尾解码若赶不上句尾，就直接重解一次整句，而不是等一个覆盖不到句尾的在途解码（那会白等 1.6 s）。
+- **精修会让路**：只要还在说话、或有定稿在途，精修线程就不启动 —— 两个模型抢 4 个核，会把 0.9 s 的解码拖成 3.9 s。
 
-- 服务端把这个实测值放进状态，界面直接显示「比说话慢约 N 倍」，不用你自己算。
+- 服务端把实测值放进状态：界面显示「实时字幕每次解码约 N 秒」，不用你自己算。
 - 「识别模型」下拉框可随时切换，切换只加载本地文件，**不会触发下载**。
-- A/B/C 档的 p95 门禁（首条 partial ≤2.0 s、final ≤3.0 s）**仍未达标**，这是技术预览的原因之一；上表是单段样本的相对比较，不是达标证据。
+- A/B/C 档的 p95 门禁（首条 partial ≤2.0 s、final ≤3.0 s）**仍未达标**：首字 2.8 s 卡在「2 s 缓冲 + 1 次解码」的物理下限，要再快只能换更强的 CPU 或更小的模型。这是技术预览的原因之一。
 
 ---
 
@@ -164,7 +166,7 @@ python packaging/smoke_test.py dist/EchoNote/EchoNote.exe
 模型托管在 Hugging Face。`fetch-model.bat` 与 `python tools/fetch_model.py` 默认就走 `https://hf-mirror.com`，并且关掉了镜像无法代理的 Xet 通道：
 
 ```bash
-# 默认档（高精度，约 1.6 GB）
+# 默认双档：极速 145 MB（实时字幕）+ 快速 464 MB（定稿）
 python tools/fetch_model.py
 
 # 指定档位 / 换源 / 强制重下
@@ -186,7 +188,7 @@ python tools/fetch_model.py --list
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `ECHONOTE_MODEL` | `large-v3-turbo` | 档位：`tiny` / `small` / `medium` / `large-v3-turbo` / `large-v3`，或任意本地目录 |
+| `ECHONOTE_MODEL` | `small` | 定稿档位：`base` / `small` / `medium` / `large-v3-turbo` / `large-v3`，或任意本地目录 |
 | `ECHONOTE_MODEL_DIR` | `./models` | 模型目录 |
 | `ECHONOTE_OFFLINE` | 未设置 | 设为 `1` 后禁止一切联网；缺模型时立即报错并给出应放路径 |
 | `ECHONOTE_LANGUAGE` | `zh` | 默认语言，如 `zh`、`en`；`auto` 为自动识别 |
@@ -199,7 +201,11 @@ python tools/fetch_model.py --list
 | `ECHONOTE_CONDITION_ON_PREVIOUS` | `1` | final 是否承接上一句上下文 |
 | `ECHONOTE_PROMPT_ZH` | 见源码 | 中文 initial_prompt，用于压住繁体与无标点输出 |
 | `ECHONOTE_CPU_THREADS` | `0` | ctranslate2 线程数，`0` 为自动 |
-| `ECHONOTE_PARTIAL_INTERVAL_S` | `1.2` | 实时字幕**下限节流**间隔，不是承诺值 |
+| `ECHONOTE_LIVE_MODEL` | 自动 | 实时字幕用哪个档；默认取已安装的最快一档（`base` > `small` > `tiny`），都没有就用定稿档 |
+| `ECHONOTE_DISABLE_LIVE` | 未设置 | 设为 `1` 退回 v0.10 行为：没有增量字幕，每句结束才出文字 |
+| `ECHONOTE_LIVE_STEP_S` | `0.6` | 实时解码的**下限节流**：至少来了这么多新音频才解一次，不是承诺值 |
+| `ECHONOTE_DISABLE_REFINE` | 未设置 | 设为 `1` 关闭定稿精修，字幕只保留实时档的结果 |
+| `ECHONOTE_REFINE_QUEUE_MAX` | `3` | 等待精修的句子数上限，超出的直接丢弃并提示 |
 | `ECHONOTE_MAX_RECORD_MINUTES` | `90` | 录音时长软上限；`0` 表示不限（界面会提示内存风险自负） |
 | `ECHONOTE_HOST` | `127.0.0.1` | 监听地址（启动脚本会让它生效） |
 | `ECHONOTE_PORT` | `8000` | 端口（启动脚本会让它生效） |
@@ -211,13 +217,16 @@ python tools/fetch_model.py --list
 
 | 模型 | 体积 | 整段 RTF（9 s） | 中文表现 | 适合 |
 |------|------|----------------|---------|------|
-| `tiny` | ~75 MB | 未测 | 差 | 只用来验证链路通不通 |
-| `small` | ~464 MB | 0.41 | 本机样本 CER 17.2%，「实时」听成「时时」 | 4 核机器、要求低延迟 |
+| `tiny` | ~75 MB | 未测 | 差，会输出繁体 | 只用来验证链路通不通 |
+| **`base`** | ~145 MB | 0.12 | 本机样本 CER 20.7%，错字较多 | **实时字幕默认档**；单次解码 ~1.1 s |
+| **`small`** | ~464 MB | 0.41 | 本机样本 CER 17.2%，「实时」听成「时时」 | **定稿默认档**；4 核机器上单句 ~4 s |
 | `medium` | ~1.5 GB | 1.08 | 本机样本 CER 13.8%，与 turbo 相同但快 28% | 6 核以上，平衡选择 |
-| **`large-v3-turbo`** | ~1.6 GB | **1.50** | 本机样本 CER 13.8%，同音字错误被纠正 | **默认档；8 核以上体验最好** |
+| `large-v3-turbo` | ~1.6 GB | 1.50 | 本机样本 CER 13.8%，同音字错误被纠正 | 8 核以上，且只当定稿档 |
 | `large-v3` | ~3.1 GB | 未测 | 理论最好 | 8 核以上再考虑 |
 
 > 纯 CPU 即可运行（int8 量化），独立显卡不是必需的。int8 与 float32 在本机样本上输出**逐字相同**，只是慢 40%，所以量化不是准确率的瓶颈，模型规模才是。
+>
+> 实时字幕用 `base`、定稿用 `small`，是刻意分工：实时那句只活 1–3 秒就被重写，错一个字的代价远小于晚一秒出字。
 >
 > 这个 CER 是在**一段**人工核对过的音频上算的，用于横向比较三个模型，不代表通用中文准确率。完整基线需要 ≥30 句人工标注录音（见 `docs/consistency-checklist.md`）。
 
@@ -300,8 +309,10 @@ echonote/
 ├── app/
 │   ├── __main__.py    # python -m app（含监听地址安全检查）
 │   ├── desktop.py     # 便携版入口：横幅、自动开浏览器、--self-test
-│   ├── main.py        # FastAPI、WebSocket 会话、协议 v2、并发与队列上限
-│   ├── protocol.py    # 协议 v2 消息构造与校验
+│   ├── main.py        # FastAPI、WebSocket 会话、并发与队列上限
+│   ├── protocol.py    # 协议 v3 消息构造与校验
+│   ├── live.py        # 实时字幕线程：增长中的缓冲 + 最新快照解码
+│   ├── stream.py      # 一句话的音频缓冲、增长策略、防回缩保护
 │   ├── stt.py         # faster-whisper 加载（可重试）与转写
 │   ├── vad.py         # 能量 VAD 自动断句
 │   └── config.py      # 环境变量配置（含 frozen 路径解析）
@@ -330,7 +341,7 @@ echonote/
 
 ---
 
-## 🌐 HTTP 与 WebSocket 协议（v2）
+## 🌐 HTTP 与 WebSocket 协议（v3）
 
 ### HTTP
 
@@ -356,9 +367,10 @@ echonote/
 
 | 消息 | 说明 |
 |------|------|
-| `{"type":"status","protocol":"2","ready":true,...}` | 握手状态与变更推送 |
+| `{"type":"status","protocol":"3","ready":true,...}` | 握手状态与变更推送；含 `live_model` / `live_separate` / `live_ms` |
 | `{"type":"partial","text":"...","epoch":1,"start":1.2}` | 实时字幕（会被覆盖） |
-| `{"type":"final","id":"1-1","epoch":1,"text":"...","start":1.2,"end":3.8}` | 确定文本，`id` 为 `epoch-序号`，全局唯一 |
+| `{"type":"final","id":"1-1","epoch":1,"text":"...","start":1.2,"end":3.8,"stable":false}` | 一句的定稿。`stable:false` 表示定稿模型还会改写它 |
+| `{"type":"refine","id":"1-1","epoch":1,"text":"...","start":1.2,"end":3.8}` | 精修结果：**同 id** 替换文本，时间轴不动 |
 | `{"type":"error","code":"busy","message":"...","retryable":true}` | 错误（`frame_too_large` / `busy` / `model_not_ready` / `unsupported_protocol`） |
 | `{"type":"warning","code":"audio_backlog_dropped","dropped_ms":320}` | 降级告警，不中断 |
 | `{"type":"done"}` | 会话结束 |
@@ -379,10 +391,10 @@ echonote/
 不需要。点界面上的「重试」即可；失败后系统还会自动重试 3 次（间隔 60 s），之后保留手动重试入口。
 
 **识别速度慢？**
-先看界面上的倍速提示。`RTF > 1` 说明模型跑不过说话速度：在「识别模型」里切到 `small`（需先 `fetch-model --model small`），或关闭其他占用 CPU 的程序。高精度档在 4 核机器上本来就跑不到实时。
+先看界面上的提示。v0.11 把实时字幕和定稿分开了：字幕由最快的已安装档（默认 `base`）画，定稿由「识别模型」下拉框里那一档（默认 `small`）算。如果提示说实时解码超过 1.5 s，装一个 `base`（`fetch-model --model base`，145 MB）就能明显改善；定稿慢只会影响「精修中」标记的停留时间，不影响你读字幕。
 
 **识别不准确？**
-按收益排序：① 用高精度档（`large-v3-turbo`），同音字错误会明显减少；② 明确选「中文」而不是「自动识别」；③ 环境噪声大时调高 `ECHONOTE_VAD_THRESHOLD`（数值越大越不灵敏），或用带降噪的麦克风。
+按收益排序：① 把「识别模型」（定稿档）换成更大的模型，`medium` / `large-v3-turbo` 的同音字错误明显更少；② 明确选「中文」而不是「自动识别」；③ 环境噪声大时调高 `ECHONOTE_VAD_THRESHOLD`（数值越大越不灵敏），或用带降噪的麦克风。实时字幕那一行天生比定稿差一档，最终文本以定稿/精修结果为准。
 
 **录音很久会怎样？**
 默认 90 分钟软上限：72 分钟提示，到点自动停止，但已产生的文字与音频全部可以导出，不会静默丢弃。

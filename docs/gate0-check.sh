@@ -46,7 +46,7 @@ expect_hit "9  sensitivity direction is explicit" "越不灵敏"             REA
 expect_hit "10 max record minutes documented"    "ECHONOTE_MAX_RECORD_MINUTES" README.md
 expect_hit "10 non-local opt-in documented"      "ECHONOTE_ALLOW_NONLOCAL"     README.md
 expect_hit "11 liveness probe semantics stated"  "仅表示进程存活"        README.md
-expect_hit "13 protocol v2 documented"           '"protocol":"2"'       README.md
+expect_hit "13 protocol v3 documented"           '"protocol":"3"'       README.md
 expect_hit "15 offline mode documented"          "ECHONOTE_OFFLINE"     README.md
 expect_hit "16 model switch documented"          "识别模型"              README.md
 

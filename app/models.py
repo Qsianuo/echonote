@@ -65,7 +65,7 @@ CATALOG: tuple[ModelSpec, ...] = (
         label="高精度",
         size_mb=1620,
         tier="quality",
-        note="large-v3 的蒸馏版：中文准确率接近 large-v3，解码快数倍，默认档",
+        note="中文最准的实用档，但 4 核 CPU 上单句定稿约 12 秒，只建议短录音",
     ),
     ModelSpec(
         key="medium",
@@ -83,22 +83,55 @@ CATALOG: tuple[ModelSpec, ...] = (
         label="快速",
         size_mb=464,
         tier="speed",
-        note="v0.9.x 的默认档；本机样本上把「实时」听成「时时」，CER 17%",
+        note="默认档：本机单句定稿约 4 秒，配合极速档做实时字幕，4 核机器上最平衡",
+    ),
+    ModelSpec(
+        key="base",
+        repo="Systran/faster-whisper-base",
+        dirname="faster-whisper-base",
+        label="极速",
+        size_mb=145,
+        tier="speed",
+        note="「边说边出字」用的低延迟档：本机单次解码约 0.9 s，准确率低于 small",
     ),
     ModelSpec(
         key="tiny",
         repo="Systran/faster-whisper-tiny",
         dirname="faster-whisper-tiny",
-        label="极速",
+        label="试验",
         size_mb=75,
         tier="speed",
-        note="只适合试跑链路，中文准确率不可用",
+        note="只适合试跑链路，中文会输出繁体，准确率不可用",
     ),
 )
 
-DEFAULT_KEY = "large-v3-turbo"
+# The model that produces the *final* transcript. It is no longer the same
+# model that draws the live caption: v3 pairs it with the fastest installed
+# model (see ``stt.live_target``) so a 4-core machine can show text within a
+# second without giving up accuracy on the archive.
+#
+# ``small`` rather than ``large-v3-turbo`` because the accurate pass runs once
+# per utterance in the background: at 12 s per sentence on a 4-core CPU the
+# refinement queue never drains, and the exported text silently stays at live
+# quality. 464 MB is also a friendlier first download than 1.6 GB.
+DEFAULT_KEY = "small"
+
+# Preference order for the model that draws the live caption (``stt.live_target``).
+# Fastest first: the caption is provisional and gets rewritten, so a wrong word
+# costs less than a late one.
+LIVE_PREFERENCE = ("base", "small", "tiny")
 
 BY_KEY: dict[str, ModelSpec] = {spec.key: spec for spec in CATALOG}
+
+
+def default_pair() -> tuple[str, ...]:
+    """The two keys a fresh install needs: one for captions, one for finals.
+
+    ``fetch_model.py`` downloads exactly this set by default, so a user who
+    runs one command gets the architecture the latency numbers describe.
+    """
+    live = next((key for key in LIVE_PREFERENCE if key in BY_KEY), DEFAULT_KEY)
+    return tuple(dict.fromkeys((live, DEFAULT_KEY)))
 # Directory name -> spec, so a hand-placed ``models/faster-whisper-medium``
 # resolves even when the user never sets ECHONOTE_MODEL.
 BY_DIRNAME: dict[str, ModelSpec] = {spec.dirname: spec for spec in CATALOG}

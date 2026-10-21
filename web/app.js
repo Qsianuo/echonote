@@ -4,7 +4,7 @@
 
   const SAMPLE_RATE = 16000;
   const MERGE_SAMPLES = 1600; // 100 ms upstream frame (PRD D-06 / FR-038)
-  const PROTOCOL_VERSION = '2';
+  const PROTOCOL_VERSION = '3';
   const RECONNECT_BASE_MS = 1500;
   const RECONNECT_MAX_MS = 15000;
   const RECONNECT_ATTEMPTS_CAP = 4;
@@ -212,6 +212,9 @@
       case 'final':
         onFinal(message);
         break;
+      case 'refine':
+        onRefine(message);
+        break;
       case 'error':
         onServerError(message);
         break;
@@ -248,21 +251,49 @@
   }
 
   /**
-   * The server measures the real-time factor of the finals it actually
-   * produced. When a larger model cannot keep up on this CPU, say so with the
-   * number instead of letting the user wonder why captions trail behind.
+   * Two models are at work in v3: a fast one draws the live caption, an
+   * accurate one rewrites each finished sentence. Report both honestly —
+   * the number the user feels is the live decode time, not the RTF of finals.
    */
-  function updateSpeedNotice(rtfValue) {
+  function updateSpeedNotice(message) {
     if (!el.speedNotice) return;
-    const value = Number(rtfValue);
-    if (!Number.isFinite(value) || value <= 1.05) {
+    const liveMs = Number(message.live_ms);
+    const value = Number(message.rtf);
+    const notes = [];
+
+    if (Number.isFinite(liveMs) && liveMs > 0) {
+      if (liveMs <= 1500) {
+        notes.push(`实时字幕每次解码约 ${(liveMs / 1000).toFixed(1)} 秒，边说边出字。`);
+      } else {
+        notes.push(
+          `实时字幕每次解码约 ${(liveMs / 1000).toFixed(1)} 秒，会比说话慢一些。` +
+            '装一个更小的模型（base / small）能明显改善。'
+        );
+      }
+    }
+
+    if (message.refine && Number.isFinite(value) && value > 1.05) {
+      notes.push(
+        `定稿用更大的模型，比说话慢约 ${value.toFixed(1)} 倍；` +
+          '它只在每句结束后后台运行，不影响实时字幕。'
+      );
+    }
+
+    if (notes.length === 0) {
       el.speedNotice.hidden = true;
+      el.speedNotice.textContent = '';
       return;
     }
     el.speedNotice.hidden = false;
-    el.speedNotice.textContent =
-      `当前模型比说话慢约 ${value.toFixed(1)} 倍，字幕会延迟。` +
-      '可在「识别模型」里切到更快的档位（需已安装），或用 fetch-model 下载小模型。';
+    el.speedNotice.textContent = notes.join(' ');
+  }
+
+  /** "实时 极速 · 定稿 快速" — only when the two roles really differ. */
+  function modelRoleText(message) {
+    const live = modelDisplayName(message.live_model, message.live_model_label);
+    const final = modelDisplayName(message.model, message.model_label);
+    if (!message.live_separate) return final;
+    return `实时 ${live} · 定稿 ${final}`;
   }
 
   function applyStatus(message) {
@@ -273,10 +304,12 @@
 
     state.modelReady = !!message.ready;
     state.modelName = modelDisplayName(message.model, message.model_label);
-    el.modelTag.textContent = state.modelName;
-    el.footerModel.textContent = state.modelName;
+    el.modelTag.textContent = state.modelReady
+      ? modelRoleText(message)
+      : state.modelName;
+    el.footerModel.textContent = modelRoleText(message);
     setOfflineBadge(message.offline_ready);
-    updateSpeedNotice(message.rtf);
+    updateSpeedNotice(message);
 
     if (message.error) {
       setModelPill('bad', '模型加载失败');
@@ -803,6 +836,9 @@
       end: originSeconds + Number(message.end || 0),
       epoch: message.epoch,
       corrected: isCorrected(message.text, state.lastPartialText),
+      // v3: the live model produced this text; the accurate model may still
+      // replace it via a `refine` message with the same id.
+      stable: message.stable !== false,
     };
 
     state.finals.push(item);
@@ -815,6 +851,63 @@
     if (state.recording) setHint('正在录音 · 实时转写中');
     else setHint('已停止 · 可导出');
     announce(item.corrected ? '新增一条字幕（已修正）' : '新增一条字幕');
+  }
+
+  /**
+   * Replace the text of a final that was emitted with `stable: false`.
+   * The row keeps its position and timestamp; only the words change, so a
+   * reader never sees the transcript jump around.
+   */
+  function onRefine(message) {
+    const item = state.finals.find((entry) => entry.id === message.id);
+    if (!item) return;
+
+    const row = findRow(item.id);
+    const next = String(message.text || '').trim();
+    const changed = next && next !== item.text;
+
+    if (changed) {
+      item.text = next;
+      const text = row && row.querySelector('p');
+      if (text) text.textContent = next;
+    }
+    item.stable = true;
+
+    if (row) {
+      if (changed) setRowBadge(row, '已精修', true);
+      else setRowBadge(row, '', false);
+    }
+    updateExportState();
+  }
+
+  function findRow(id) {
+    for (const row of el.finals.children) {
+      if (row.dataset && row.dataset.id === id) return row;
+    }
+    return null;
+  }
+
+  /**
+   * One badge slot per row: "精修中" while the accurate pass runs, "已精修"
+   * once it lands and changed the text, nothing otherwise.
+   */
+  function setRowBadge(row, label, fade) {
+    let badge = row.querySelector('.badge');
+    if (!label) {
+      if (badge) badge.remove();
+      return;
+    }
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'badge';
+      row.appendChild(badge);
+    }
+    badge.textContent = label;
+    badge.classList.remove('fade');
+    badge.classList.toggle('pending', label === '精修中');
+    if (fade) {
+      setTimeout(() => badge.classList.add('fade'), CORRECTION_BADGE_MS);
+    }
   }
 
   function appendFinal(item) {
@@ -834,16 +927,16 @@
 
     row.appendChild(ts);
     row.appendChild(text);
+    el.finals.appendChild(row);
 
-    if (item.corrected) {
-      const badge = document.createElement('span');
-      badge.className = 'badge';
-      badge.textContent = '已修正';
-      row.appendChild(badge);
-      setTimeout(() => badge.classList.add('fade'), CORRECTION_BADGE_MS);
+    if (!item.stable) {
+      // Accurate pass still running: say so instead of pretending this is
+      // the last word on the sentence.
+      setRowBadge(row, '精修中', false);
+    } else if (item.corrected) {
+      setRowBadge(row, '已修正', true);
     }
 
-    el.finals.appendChild(row);
     scrollToBottom();
   }
 

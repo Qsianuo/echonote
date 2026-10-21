@@ -130,16 +130,19 @@ def _fetch_model(argv: list[str]) -> int:
     """
     from . import fetch, models
 
-    key = models.DEFAULT_KEY
+    keys = list(models.default_pair())
     for item in argv[argv.index("--fetch-model") + 1 :]:
         if not item.startswith("-"):
-            key = item.strip()
+            keys = [item.strip()]
             break
 
-    spec = models.BY_KEY.get(key)
-    if spec is None:
-        print(f"未知模型 {key!r}。可用：{', '.join(models.BY_KEY)}")
-        return 2
+    specs = []
+    for key in keys:
+        spec = models.BY_KEY.get(key)
+        if spec is None:
+            print(f"未知模型 {key!r}。可用：{', '.join(models.BY_KEY)}")
+            return 2
+        specs.append(spec)
 
     print("=" * 58)
     print(f"  EchoNote 声记  v{config.APP_VERSION}  模型下载")

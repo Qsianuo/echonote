@@ -1,4 +1,4 @@
-"""RG-04: protocol v2 contract.
+"""RG-04: protocol v3 contract.
 
 Every message the server can emit must be constructible, valid, and reject
 the mistakes we actually made before (missing codes, reset ids, end < start).
@@ -86,3 +86,46 @@ def test_validate_rejects_bool_where_number_expected():
 
 def test_done_is_minimal():
     assert protocol.done() == {"type": "done"}
+
+
+# --------------------------------------------------------------------------
+# v3: provisional finals and refinement
+# --------------------------------------------------------------------------
+
+
+def test_final_is_stable_by_default():
+    message = protocol.final(final_id="1-1", epoch=1, text="你好", start=0.0, end=1.0)
+    assert message["stable"] is True
+    protocol.validate(message)
+
+
+def test_provisional_final_is_marked():
+    message = protocol.final(
+        final_id="1-2", epoch=1, text="你好", start=0.0, end=1.0, stable=False
+    )
+    assert message["stable"] is False
+    protocol.validate(message)
+
+
+def test_refine_carries_the_same_id_shape_as_final():
+    message = protocol.refine(final_id="1-2", epoch=1, text="精修", start=0.0, end=1.0)
+    protocol.validate(message)
+    assert message["type"] == "refine"
+    assert message["id"] == "1-2"
+
+
+@pytest.mark.parametrize("bad_id", ["3", "2-0", "a-1"])
+def test_refine_rejects_malformed_ids(bad_id: str):
+    message = protocol.refine(final_id=bad_id, epoch=2, text="x", start=0.0, end=1.0)
+    with pytest.raises(protocol.ProtocolError):
+        protocol.validate(message)
+
+
+def test_refine_rejects_empty_text():
+    message = protocol.refine(final_id="1-1", epoch=1, text="", start=0.0, end=1.0)
+    with pytest.raises(protocol.ProtocolError):
+        protocol.validate(message)
+
+
+def test_refine_backlog_warning_is_whitelisted():
+    protocol.validate(protocol.warning(code="refine_backlog_dropped", dropped_ms=0))

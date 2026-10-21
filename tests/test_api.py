@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from app import config, main, stt
+from app import config, main, protocol, stt
 
 
 @pytest.fixture()
@@ -31,7 +31,7 @@ def test_ready_exposes_model_state(client):
 def test_config_matches_the_documented_limits(client):
     body = client.get("/api/config").json()
 
-    assert body["protocol"] == "2"
+    assert body["protocol"] == protocol.PROTOCOL_VERSION
     assert body["version"] == config.APP_VERSION
     assert body["sample_rate"] == 16000
     assert len(body["languages"]) == 9
@@ -41,6 +41,9 @@ def test_config_matches_the_documented_limits(client):
     assert body["max_record_minutes"] == 90
     assert body["max_sessions"] == 2
     assert body["queue_max_seconds"] == 60
+    # v3: the live caption role must be discoverable, not guessed by the UI.
+    assert "live_model" in body and "live_separate" in body and "refine" in body
+    assert body["live_step_s"] == config.LIVE_STEP_S
 
 
 def test_security_headers_are_present(client):

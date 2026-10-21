@@ -107,20 +107,32 @@ def live_target() -> models.Target:
 
     Resolution:
     1. ``ECHONOTE_LIVE_MODEL`` when that model is installed;
-    2. the fastest installed model from :data:`_LIVE_PREFERENCE`;
-    3. otherwise the main model (live captions then cost as much as finals,
-       and the caller stops pretending they are cheap).
+    2. the fastest installed model that is **not larger** than the chosen one;
+    3. otherwise the chosen model itself.
+
+    Rule 2 is size-capped on purpose. Picking the 75 MB tier used to leave the
+    caption on the 145 MB model and then skip refinement because "the final
+    model is smaller", so the 75 MB model never ran at all — the user chose a
+    model and got a different one. Capping at the chosen size makes an explicit
+    choice mean what it says: pick ``tiny`` and ``tiny`` draws the caption.
     """
     explicit = config.LIVE_MODEL
     if explicit:
         target = models.resolve(config.MODEL_DIR, explicit)
         if target.path is not None:
             return target
-    installed = {spec.key for spec in models.available(config.MODEL_DIR)}
+
+    main = config.model_target()
+    ceiling = _size_of(main)
+    installed = {
+        spec.key
+        for spec in models.available(config.MODEL_DIR)
+        if spec.size_mb <= ceiling
+    }
     for key in _LIVE_PREFERENCE:
         if key in installed:
             return models.resolve(config.MODEL_DIR, key)
-    return config.model_target()
+    return main
 
 
 def live_is_separate() -> bool:
@@ -374,6 +386,7 @@ def switch(model_key: str) -> dict:
     # load discard its own result instead.
     _generation += 1
     config.MODEL_CHOICE = model_key
+    config.remember_model(model_key)
     _model = None
     _ready.clear()
     _error = None
@@ -486,24 +499,20 @@ def status() -> dict:
     }
 
 
-# The ``tiny`` model is the one entry in the catalog that gets *worse* with the
-# instruction prompt. Measured on the sample utterance, whole file:
-#   with prompt    1.96 s  "你好,这是回生笔记的实实语音时别特势。…开始入音。"
-#   without prompt 1.10 s  "你好,这是回生笔记的实实语音时别测试,…开始入音。"
-# It also answers the prompt by *repeating* it, which is how "请使用简体中文和
-# 标点符号转写。" ended up on screen as a caption. Every other size benefits
-# (base without the prompt drifts into Traditional Chinese), so the rule is
-# per-model rather than global.
-_NO_PROMPT_KEYS = frozenset({"tiny"})
+# ``tiny`` cannot follow the full instruction: it *answers* it, which is how
+# "请使用简体中文和标点符号转写。" ended up on screen as a caption. It still
+# needs the language hint though — with no prompt at all it writes Traditional
+# Chinese ("這是回生筆記的實實…"). The short prompt does exactly one job.
+_SHORT_PROMPT_KEYS = frozenset({"tiny"})
 
 
 def _prompt_for(lang: str | None, model_key: str | None) -> str | None:
     """The ``initial_prompt`` to use for this language and model."""
-    if lang != "zh" or not config.ASR_PROMPT_ZH:
+    if lang != "zh":
         return None
-    if model_key in _NO_PROMPT_KEYS:
-        return None
-    return config.ASR_PROMPT_ZH
+    if model_key in _SHORT_PROMPT_KEYS:
+        return config.ASR_PROMPT_ZH_SHORT or None
+    return config.ASR_PROMPT_ZH or None
 
 
 def _size_of(target: models.Target) -> int:
@@ -548,7 +557,11 @@ def _live_engine():
     return _model, _infer_lock
 
 
-def transcribe_live(audio: np.ndarray, language: str | None = None) -> str:
+def transcribe_live(
+    audio: np.ndarray,
+    language: str | None = None,
+    hotwords: str | None = None,
+) -> str:
     """Decode one live caption. Optimised for latency, not for the archive.
 
     Greedy, no temperature fallback, no cross-utterance conditioning: on a
@@ -578,6 +591,10 @@ def transcribe_live(audio: np.ndarray, language: str | None = None) -> str:
             condition_on_previous_text=False,
             without_timestamps=True,
             initial_prompt=prompt,
+            # The glossary matters most here: this is the text the user reads
+            # while speaking, and it is the only pass that runs when the
+            # chosen model is fast enough to also be the live one.
+            hotwords=hotwords or config.HOTWORDS,
             no_speech_threshold=config.ASR_NO_SPEECH_THRESHOLD,
             log_prob_threshold=config.ASR_LOG_PROB_THRESHOLD,
             compression_ratio_threshold=config.ASR_COMPRESSION_RATIO_THRESHOLD,
@@ -613,7 +630,12 @@ def live_ms() -> int | None:
 
 
 
-def transcribe(audio: np.ndarray, language: str | None = None, fast: bool = False) -> str:
+def transcribe(
+    audio: np.ndarray,
+    language: str | None = None,
+    fast: bool = False,
+    hotwords: str | None = None,
+) -> str:
     """Transcribe mono float32 audio in [-1, 1] sampled at 16 kHz.
 
     ``fast=True`` is used for live partial captions (lower latency); the final
@@ -651,7 +673,7 @@ def transcribe(audio: np.ndarray, language: str | None = None, fast: bool = Fals
             # Domain words bias the choice between homophones ("回声" vs
             # "回生") without giving the model a sentence it can answer, which
             # is the failure mode of putting them in the prompt.
-            hotwords=config.HOTWORDS,
+            hotwords=hotwords or config.HOTWORDS,
             no_speech_threshold=config.ASR_NO_SPEECH_THRESHOLD,
             log_prob_threshold=config.ASR_LOG_PROB_THRESHOLD,
             compression_ratio_threshold=config.ASR_COMPRESSION_RATIO_THRESHOLD,

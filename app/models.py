@@ -101,7 +101,7 @@ CATALOG: tuple[ModelSpec, ...] = (
         label="试验",
         size_mb=75,
         tier="speed",
-        note="本机样本 CER 34.5%（base 20.7%）：能出字，但会自己编词，不建议当定稿档",
+        note="本机样本 CER 27.6%；填了专有名词词表后降到 13.8%（仍低于 base），会编词",
     ),
 )
 

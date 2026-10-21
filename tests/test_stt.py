@@ -443,10 +443,17 @@ def test_prompt_echo_is_stripped_from_the_middle_of_a_hypothesis():
     assert stt._clean(text, prompt) == "今天天气特别差。"
 
 
-def test_tiny_gets_no_instruction_prompt(tmp_path, monkeypatch):
-    """Measured: the prompt costs tiny 44% more time *and* accuracy."""
-    assert stt._prompt_for("zh", "tiny") is None
+def test_tiny_gets_the_short_prompt_not_the_instruction():
+    """`tiny` answers the instruction; with no prompt it writes Traditional.
+
+    Measured on the sample clip:
+      no prompt        "你好,這是回生筆記的實實與因時別測試"   (Traditional)
+      short prompt     "你好,这是回生笔记的实实与音实别特势。" (Simplified)
+      full prompt      the instruction itself as a caption
+    """
+    assert stt._prompt_for("zh", "tiny") == config.ASR_PROMPT_ZH_SHORT
     assert stt._prompt_for("zh", "base") == config.ASR_PROMPT_ZH
+    assert len(config.ASR_PROMPT_ZH_SHORT) < len(config.ASR_PROMPT_ZH)
     # Other languages never get the Chinese instruction.
     assert stt._prompt_for("en", "base") is None
 
@@ -461,13 +468,35 @@ def test_refinement_is_skipped_when_the_final_model_is_smaller(tmp_path, monkeyp
     monkeypatch.setattr(config, "MODEL_DIR", str(tmp_path))
     monkeypatch.setattr(config, "LIVE_MODEL", None)
 
-    # tiny as the final model: live is base (145 MB), tiny is 75 MB.
+    # tiny as the final model: the caption is capped at the chosen size, so
+    # tiny runs both passes and there is no second model to refine with.
     monkeypatch.setattr(config, "MODEL_CHOICE", "tiny")
-    assert stt.live_target().key == "base"
+    assert stt.live_target().key == "tiny"
+    assert stt.live_is_separate() is False
     assert stt.refine_enabled() is False
-    assert stt.refine_blocked_reason() == "final_model_not_bigger"
+    assert stt.refine_blocked_reason() == "single_model"
 
     # small as the final model: the second pass is a real improvement.
     monkeypatch.setattr(config, "MODEL_CHOICE", "small")
     assert stt.refine_enabled() is True
     assert stt.refine_blocked_reason() is None
+
+
+def test_the_model_choice_survives_a_restart(tmp_path, monkeypatch):
+    """The dropdown used to forget the choice, so picking 75 MB looked broken."""
+    monkeypatch.setattr(config, "MODEL_DIR", str(tmp_path))
+    assert config._sticky_choice() is None
+    config.remember_model("tiny")
+    assert config._sticky_choice() == "tiny"
+    config.remember_model(None)
+    assert config._sticky_choice() is None
+
+
+def test_the_model_choice_survives_a_restart(tmp_path, monkeypatch):
+    """The dropdown used to forget the choice, so picking 75 MB looked broken."""
+    monkeypatch.setattr(config, "MODEL_DIR", str(tmp_path))
+    assert config._sticky_choice() is None
+    config.remember_model("tiny")
+    assert config._sticky_choice() == "tiny"
+    config.remember_model(None)
+    assert config._sticky_choice() is None

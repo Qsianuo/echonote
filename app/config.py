@@ -7,11 +7,14 @@ probe for a locally cached model), so tests can import this module freely.
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from pathlib import Path
 
 from . import models
+
+log = logging.getLogger("echonote.config")
 
 
 def is_frozen() -> bool:
@@ -96,7 +99,22 @@ def _env_float(name: str, default: float) -> float:
 # --------------------------------------------------------------------------
 
 MODEL_DIR = os.getenv("ECHONOTE_MODEL_DIR", str(ROOT_DIR / "models"))
-MODEL_CHOICE = os.getenv("ECHONOTE_MODEL", "").strip() or None
+def _sticky_choice() -> str | None:
+    """The model the user picked in the UI last time, if any.
+
+    The dropdown used to forget the choice on every restart, which made an
+    explicit pick feel like it did not stick. The env var still wins: it is the
+    operator's override, the file is the user's preference.
+    """
+    path = Path(MODEL_DIR) / "choice.txt"
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return value or None
+
+
+MODEL_CHOICE = os.getenv("ECHONOTE_MODEL", "").strip() or _sticky_choice()
 LANGUAGE = os.getenv("ECHONOTE_LANGUAGE", "zh")
 
 # ``ECHONOTE_OFFLINE=1`` forbids *any* network access: a missing model then
@@ -116,6 +134,19 @@ def offline_mode() -> bool:
 def model_target() -> models.Target:
     """Resolve which model to load. Cheap enough to call per request."""
     return models.resolve(MODEL_DIR, MODEL_CHOICE, offline=offline_mode())
+
+
+def remember_model(key: str | None) -> None:
+    """Persist the user's model choice so a restart does not undo it."""
+    path = Path(MODEL_DIR) / "choice.txt"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if key:
+            path.write_text(key + "\n", encoding="utf-8")
+        elif path.exists():
+            path.unlink()
+    except OSError:
+        log.warning("Could not persist the model choice to %s", path)
 
 
 def _default_model() -> str:
@@ -185,6 +216,17 @@ ASR_PROMPT_ZH = os.getenv(
     "以下是普通话录音，请使用简体中文和标点符号转写。",
 ).strip()
 
+# The same idea, cut to the part that only sets the *language* and not the
+# task. Small models answer the instruction instead of transcribing, so they
+# get this one: measured on `tiny`, the full prompt produced "请使用简体中文和
+# 标点符号转写。" as a caption, while this keeps the output Simplified without
+# anything to echo. Dropping the prompt entirely makes `tiny` write Traditional
+# Chinese ("這是回生筆記的實實…"), which is why this exists at all.
+ASR_PROMPT_ZH_SHORT = os.getenv(
+    "ECHONOTE_PROMPT_ZH_SHORT",
+    "以下是普通话录音。",
+).strip()
+
 # Partial captions.
 #
 # ``LIVE_STEP_S`` is how much *new* audio must arrive before the live caption
@@ -239,6 +281,10 @@ REFINE_DRAIN_MAX_S = _env_float("ECHONOTE_REFINE_DRAIN_MAX_S", 60.0)
 # the token choice without the model being able to "answer" them, which is how
 # "回声笔记" survives a model that would otherwise write "回生笔记".
 HOTWORDS = os.getenv("ECHONOTE_HOTWORDS", "").strip() or None
+
+# A glossary longer than this is a document, not a glossary; the decoder
+# prompt is a few hundred tokens at most.
+HOTWORDS_MAX_CHARS = max(20, _env_int("ECHONOTE_HOTWORDS_MAX_CHARS", 200))
 
 # --------------------------------------------------------------------------
 # Protocol limits (PRD §7.1, FR-038, D-06, D-12)

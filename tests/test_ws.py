@@ -37,12 +37,12 @@ def client():
 def fake_stt(monkeypatch):
     monkeypatch.setattr(stt, "is_ready", lambda: True)
     monkeypatch.setattr(
-        stt, "transcribe", lambda audio, language=None, fast=False: "测试字幕"
+        stt, "transcribe", lambda audio, language=None, fast=False, **_: "测试字幕"
     )
     # v3 decodes the growing utterance on a second thread; without this the
     # live caption returns "" and the utterance never becomes a final.
     monkeypatch.setattr(
-        stt, "transcribe_live", lambda audio, language=None: "测试字幕"
+        stt, "transcribe_live", lambda audio, language=None, **_: "测试字幕"
     )
     # Keep refinement off in the suite: it would add a second decode and a
     # `refine` message that most assertions here do not expect.
@@ -152,9 +152,9 @@ def test_unsupported_protocol_is_reported(client, fake_stt):
 def test_refine_replaces_the_provisional_final(client, monkeypatch):
     """v3: the live model's final is provisional; the accurate pass rewrites it."""
     monkeypatch.setattr(stt, "is_ready", lambda: True)
-    monkeypatch.setattr(stt, "transcribe_live", lambda audio, language=None: "实时字幕")
+    monkeypatch.setattr(stt, "transcribe_live", lambda audio, language=None, **_: "实时字幕")
     monkeypatch.setattr(
-        stt, "transcribe", lambda audio, language=None, fast=False: "精修字幕"
+        stt, "transcribe", lambda audio, language=None, fast=False, **_: "精修字幕"
     )
     monkeypatch.setattr(stt, "refine_enabled", lambda: True)
 
@@ -173,3 +173,44 @@ def test_refine_replaces_the_provisional_final(client, monkeypatch):
         assert refined["text"] == "精修字幕"
         # Same timeline: a refinement may not move the caption.
         assert (refined["start"], refined["end"]) == (final["start"], final["end"])
+
+
+def test_hotwords_travel_from_the_config_message_to_the_decoder(client, monkeypatch):
+    """The glossary is the biggest accuracy lever on the 75 MB model.
+
+    Measured on the sample clip: 31.0% -> 10.3% character error rate, which is
+    larger than every decoder knob combined. It has to reach the decode call.
+    """
+    seen: list[str | None] = []
+
+    def fake(audio, language=None, fast=False, hotwords=None):
+        seen.append(hotwords)
+        return "测试字幕"
+
+    monkeypatch.setattr(stt, "is_ready", lambda: True)
+    monkeypatch.setattr(stt, "transcribe", fake)
+    monkeypatch.setattr(stt, "refine_enabled", lambda: False)
+    # Without the live captioner the final is decoded by the accurate path,
+    # which is the one that carries the glossary.
+    monkeypatch.setattr(config, "LIVE_CAPTIONS", False)
+
+    with client.websocket_connect("/ws") as ws:
+        ws.receive_json()
+        ws.send_text(
+            json.dumps(
+                {
+                    "type": "config",
+                    "protocol": protocol.PROTOCOL_VERSION,
+                    "language": "zh",
+                    "epoch": 1,
+                    "origin_ms": 0,
+                    "hotwords": "  回声笔记   语音识别  ",
+                }
+            )
+        )
+        send_speech(ws, 1.0)
+        ws.send_text(json.dumps({"type": "flush"}))
+        receive_until(ws, "final")
+
+    # Whitespace collapsed, and it reached the decode.
+    assert seen and seen[-1] == "回声笔记 语音识别"

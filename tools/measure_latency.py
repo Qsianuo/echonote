@@ -42,7 +42,7 @@ def load_wav(path: Path) -> np.ndarray:
     return samples
 
 
-async def run(url: str, wav: Path, language: str, quiet: bool) -> dict:
+async def run(url: str, wav: Path, language: str, quiet: bool, hotwords: str = "") -> dict:
     import websockets
 
     samples = load_wav(wav)
@@ -73,6 +73,7 @@ async def run(url: str, wav: Path, language: str, quiet: bool) -> dict:
                     "language": language,
                     "epoch": 1,
                     "origin_ms": 0,
+                    "hotwords": hotwords,
                 }
             )
         )
@@ -153,9 +154,12 @@ def main() -> int:
     parser.add_argument("--language", default="zh")
     parser.add_argument("--json", default="")
     parser.add_argument("--quiet", action="store_true")
+    parser.add_argument("--hotwords", default="", help="domain words, space separated")
     args = parser.parse_args()
 
-    result = asyncio.run(run(args.url, Path(args.wav), args.language, args.quiet))
+    result = asyncio.run(
+        run(args.url, Path(args.wav), args.language, args.quiet, args.hotwords)
+    )
     print("\n=== summary ===")
     print(f"audio            {result['audio_s']}s")
     print(f"first caption    {result['first_caption_s']}s after the first frame")

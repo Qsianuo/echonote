@@ -214,3 +214,91 @@ def test_hotwords_travel_from_the_config_message_to_the_decoder(client, monkeypa
 
     # Whitespace collapsed, and it reached the decode.
     assert seen and seen[-1] == "回声笔记 语音识别"
+
+
+def test_a_repeated_final_does_not_add_a_second_row(client, monkeypatch):
+    """Room noise split into short segments, each hallucinating the same word.
+
+    Seen in the field: "转写。" at 00:13, 00:20 and 00:21 — three rows of the
+    same sentence, which reads as a stuck app. The repeats are dropped, and a
+    real new sentence still lands. The second final's id is the proof: the
+    sequence counter only advanced once, so the two middle blips never became
+    rows at all.
+    """
+    calls = {"n": 0}
+
+    def fake(audio, language=None, fast=False, **_):
+        calls["n"] += 1
+        return "转写。" if calls["n"] <= 3 else "新的句子。"
+
+    monkeypatch.setattr(stt, "is_ready", lambda: True)
+    monkeypatch.setattr(stt, "transcribe", fake)
+    monkeypatch.setattr(stt, "transcribe_live", lambda audio, language=None, **_: "转写。")
+    monkeypatch.setattr(config, "LIVE_CAPTIONS", False)
+    monkeypatch.setattr(stt, "refine_enabled", lambda: False)
+
+    with client.websocket_connect("/ws") as ws:
+        ws.receive_json()
+
+        send_speech(ws, 1.0)
+        ws.send_text(json.dumps({"type": "flush"}))
+        first = receive_until(ws, "final")
+        assert first["text"] == "转写。"
+        assert first["id"] == "1-1"
+
+        # Two more identical blips. Nothing is received here on purpose: if a
+        # row were emitted it would queue up and surface below.
+        for _ in range(2):
+            send_speech(ws, 1.0)
+            ws.send_text(json.dumps({"type": "flush"}))
+
+        send_speech(ws, 1.0)
+        ws.send_text(json.dumps({"type": "flush"}))
+        second = receive_until(ws, "final")
+        assert second["text"] == "新的句子。"
+        assert second["id"] == "1-2"
+
+
+def test_a_long_sentence_said_twice_is_two_rows(client, monkeypatch):
+    """The dedup targets hallucination blips, not speech.
+
+    A three-second sentence repeated verbatim after a pause is two sentences of
+    the transcript; collapsing them would lose words. Only segments shorter
+    than ``config.REPEAT_MAX_DURATION_S`` — where a real sentence does not
+    fit — are collapsed.
+    """
+    calls = {"n": 0}
+
+    def fake(audio, language=None, fast=False, **_):
+        calls["n"] += 1
+        return "同一句话。" if calls["n"] <= 2 else "新的一句。"
+
+    monkeypatch.setattr(stt, "is_ready", lambda: True)
+    monkeypatch.setattr(stt, "transcribe", fake)
+    monkeypatch.setattr(stt, "transcribe_live", lambda audio, language=None, **_: "同一句话。")
+    monkeypatch.setattr(config, "LIVE_CAPTIONS", False)
+    monkeypatch.setattr(stt, "refine_enabled", lambda: False)
+
+    with client.websocket_connect("/ws") as ws:
+        ws.receive_json()
+
+        # All three utterances go out before anything is read: every round
+        # emits at least the empty partial that closes a flush, so each
+        # receive below always has a message waiting — in the broken case the
+        # test fails on an assertion instead of blocking on a read.
+        for _ in range(3):
+            send_speech(ws, 3.0)
+            ws.send_text(json.dumps({"type": "flush"}))
+
+        first = receive_until(ws, "final")
+        assert first["text"] == "同一句话。"
+        assert first["id"] == "1-1"
+
+        # The verbatim repeat survives: a real sentence said twice is two rows.
+        second = receive_until(ws, "final")
+        assert second["text"] == "同一句话。"
+        assert second["id"] == "1-2"
+
+        third = receive_until(ws, "final")
+        assert third["text"] == "新的一句。"
+        assert third["id"] == "1-3"

@@ -256,6 +256,7 @@ class StreamingSession:
         self._done = threading.Event()
         self._final_seq = 0
         self._last_partial = ""
+        self._last_final_text = ""
         self._dropped_samples = 0
         self._warned_backlog = False
 
@@ -364,6 +365,7 @@ class StreamingSession:
             if value > self.epoch:
                 self.epoch = value
                 self._final_seq = 0
+                self._last_final_text = ""
         if origin_ms is not None:
             try:
                 self.origin_ms = max(0, int(origin_ms))
@@ -472,6 +474,25 @@ class StreamingSession:
         if not text:
             return
 
+        # The same text twice in a row on a *short* segment is one
+        # hallucination, not two sentences. Seen in the field: room noise split
+        # by the VAD into ~1 s blips, each decoding to "转写。" on `tiny` — the
+        # same row at 00:13, 00:20 and 00:21, which reads as a stuck app. The
+        # duration guard is the point: a real sentence said twice after a pause
+        # is longer than REPEAT_MAX_DURATION_S and keeps both rows, because
+        # dropping the second one would lose words from the transcript.
+        if (
+            text == self._last_final_text
+            and (end - start) < config.REPEAT_MAX_DURATION_S
+        ):
+            log.info(
+                "Session %s: repeated final %r on a %.2fs segment, not adding another row",
+                self.id,
+                text,
+                end - start,
+            )
+            return
+
         self._final_seq += 1
         final_id = f"{self.epoch}-{self._final_seq}"
         self._last_partial = ""
@@ -486,6 +507,7 @@ class StreamingSession:
                 stable=stable,
             )
         )
+        self._last_final_text = text
         if not stable:
             self._enqueue_refine(final_id, audio, start, end)
 

@@ -174,6 +174,16 @@ VAD_HANGOVER_MS = _env_int("ECHONOTE_VAD_HANGOVER_MS", 900)
 VAD_MIN_SPEECH_MS = _env_int("ECHONOTE_VAD_MIN_SPEECH_MS", 240)
 VAD_MAX_SEGMENT_S = _env_float("ECHONOTE_VAD_MAX_SEGMENT_S", 30)
 
+# A final whose text equals the previous one, on a segment *shorter* than
+# this, is one hallucination blip rather than two sentences. Measured in the
+# field: room noise split into ~1 s segments, each decoding to "转写。" on
+# `tiny`, which rendered as the same row three times (00:13 / 00:20 / 00:21)
+# and read as a stuck app. The duration guard is what keeps the rule from
+# eating real speech: a sentence a person actually says twice, after a pause,
+# is longer than 1.5 s and keeps both rows — dropping the second would lose
+# words from the transcript.
+REPEAT_MAX_DURATION_S = _env_float("ECHONOTE_REPEAT_MAX_DURATION_S", 1.5)
+
 # --------------------------------------------------------------------------
 # Decoding
 #

@@ -74,7 +74,7 @@ CATALOG: tuple[ModelSpec, ...] = (
         label="均衡",
         size_mb=1530,
         tier="balanced",
-        note="本机实测 CER 与 turbo 相同、整段快 28%，但体积只小 100 MB",
+        note="默认档：本机样本 CER 0.0%（与 turbo 并列），单句精修约 12 s",
     ),
     ModelSpec(
         key="small",
@@ -83,7 +83,7 @@ CATALOG: tuple[ModelSpec, ...] = (
         label="快速",
         size_mb=464,
         tier="speed",
-        note="默认档：本机单句定稿约 4 秒，配合极速档做实时字幕，4 核机器上最平衡",
+        note="单句定稿约 4 秒、CER 3.4%：要精修跟得上说话时选它，牺牲一个字换速度",
     ),
     ModelSpec(
         key="base",
@@ -110,11 +110,22 @@ CATALOG: tuple[ModelSpec, ...] = (
 # model (see ``stt.live_target``) so a 4-core machine can show text within a
 # second without giving up accuracy on the archive.
 #
-# ``small`` rather than ``large-v3-turbo`` because the accurate pass runs once
-# per utterance in the background: at 12 s per sentence on a 4-core CPU the
-# refinement queue never drains, and the exported text silently stays at live
-# quality. 464 MB is also a friendlier first download than 1.6 GB.
-DEFAULT_KEY = "small"
+# v0.11.1 puts accuracy first. Measured with the exact final-pass settings the
+# app uses (beam 5, condition_on_previous_text, Chinese prompt), 8.95 s sample:
+#   small            3.66 s   CER  3.4%   ("时时语音识别")
+#   medium          12.08 s   CER  0.0%
+#   large-v3-turbo  15.65 s   CER  0.0%
+# ``small`` is only 3.4% off, but that single error is exactly the kind a
+# note-taker cannot recover from context. ``medium`` and ``turbo`` both read
+# the sample perfectly; ``medium`` is 23% faster (12 s vs 16 s per sentence on
+# four cores) and 90 MB smaller, so it is the default and ``turbo`` stays one
+# dropdown click away for anyone who wants the newer distill.
+#
+# Note the cost, because it is real: at 12 s per sentence the accurate pass
+# runs at ~2.4x realtime, so a long monologue queues. That is the price of the
+# last 3.4% and it is now bounded by REFINE_BACKLOG_SECONDS instead of silently
+# dropping work.
+DEFAULT_KEY = "medium"
 
 # Preference order for the model that draws the live caption (``stt.live_target``).
 # Fastest first: the caption is provisional and gets rewritten, so a wrong word

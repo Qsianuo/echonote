@@ -266,8 +266,12 @@ class StreamingSession:
         # Refinement queue is deliberately tiny: it is a background nicety,
         # and an unbounded one would let a slow accurate model fall hours
         # behind a meeting while holding every utterance's audio in memory.
-        self._refine: queue.Queue = queue.Queue(maxsize=config.REFINE_QUEUE_MAX)
+        # Unbounded on purpose: the backlog is capped by *audio seconds* below,
+        # which is what actually bounds memory. An item cap dropped work during
+        # ordinary speech and the export silently kept the live-model text.
+        self._refine: queue.Queue = queue.Queue()
         self._refine_pending = 0
+        self._refine_seconds = 0.0
         self._refine_lock = threading.Lock()
         self._refine_dropped = 0
         self._warned_refine = False
@@ -473,29 +477,35 @@ class StreamingSession:
     # ------------------------------------------------------------- refine
 
     def _enqueue_refine(self, final_id: str, audio: np.ndarray, start: float, end: float) -> None:
+        held = len(audio) / config.SAMPLE_RATE
         with self._refine_lock:
-            while True:
+            # Only overflow drops work, and only when the accurate model is
+            # genuinely behind by minutes. The oldest entry goes first: it is
+            # the one whose provisional text has been on screen longest.
+            while self._refine_seconds + held > config.REFINE_BACKLOG_SECONDS:
                 try:
-                    self._refine.put_nowait((final_id, audio, start, end))
-                    self._refine_pending += 1
-                    return
-                except queue.Full:
-                    try:
-                        self._refine.get_nowait()
-                        self._refine.task_done()
-                    except queue.Empty:
-                        pass
-                    self._refine_pending = max(0, self._refine_pending - 1)
-                    self._refine_dropped += 1
-                    if not self._warned_refine:
-                        self._warned_refine = True
-                        log.warning(
-                            "Session %s refinement backlog full; dropping the oldest",
-                            self.id,
-                        )
-                        self._emit(
-                            protocol.warning(code="refine_backlog_dropped", dropped_ms=0)
-                        )
+                    dropped = self._refine.get_nowait()
+                except queue.Empty:
+                    break
+                self._refine_pending = max(0, self._refine_pending - 1)
+                self._refine_seconds = max(
+                    0.0, self._refine_seconds - len(dropped[1]) / config.SAMPLE_RATE
+                )
+                self._refine_dropped += 1
+                self._refine.task_done()
+                if not self._warned_refine:
+                    self._warned_refine = True
+                    log.warning(
+                        "Session %s refinement backlog over %.0fs; dropping the oldest",
+                        self.id,
+                        config.REFINE_BACKLOG_SECONDS,
+                    )
+                    self._emit(
+                        protocol.warning(code="refine_backlog_dropped", dropped_ms=0)
+                    )
+            self._refine.put((final_id, audio, start, end))
+            self._refine_pending += 1
+            self._refine_seconds += held
 
     def _refine_loop(self) -> None:
         while True:
@@ -515,6 +525,9 @@ class StreamingSession:
             finally:
                 with self._refine_lock:
                     self._refine_pending = max(0, self._refine_pending - 1)
+                    self._refine_seconds = max(
+                        0.0, self._refine_seconds - len(audio) / config.SAMPLE_RATE
+                    )
                 self._refine.task_done()
             text = (text or "").strip()
             if not text:
@@ -530,7 +543,15 @@ class StreamingSession:
             )
 
     def _drain_refine(self, timeout: float) -> None:
-        deadline = time.monotonic() + timeout
+        with self._refine_lock:
+            pending_s = self._refine_seconds
+        # Wait for what is actually queued, not a fixed number: exporting a
+        # sentence before its accurate pass lands is the one silent way this
+        # app can hand back worse text than it produced.
+        budget = min(config.REFINE_DRAIN_MAX_S, max(timeout, pending_s * 2.5))
+        if pending_s > 0:
+            log.info("Draining %.1fs of queued refinement (budget %.0fs)", pending_s, budget)
+        deadline = time.monotonic() + budget
         while time.monotonic() < deadline:
             with self._refine_lock:
                 if self._refine_pending <= 0:

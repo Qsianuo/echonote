@@ -648,6 +648,10 @@ def transcribe(audio: np.ndarray, language: str | None = None, fast: bool = Fals
             condition_on_previous_text=False if fast else config.ASR_CONDITION_ON_PREVIOUS,
             without_timestamps=True,
             initial_prompt=prompt,
+            # Domain words bias the choice between homophones ("回声" vs
+            # "回生") without giving the model a sentence it can answer, which
+            # is the failure mode of putting them in the prompt.
+            hotwords=config.HOTWORDS,
             no_speech_threshold=config.ASR_NO_SPEECH_THRESHOLD,
             log_prob_threshold=config.ASR_LOG_PROB_THRESHOLD,
             compression_ratio_threshold=config.ASR_COMPRESSION_RATIO_THRESHOLD,

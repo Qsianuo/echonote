@@ -216,11 +216,29 @@ REFINE_FINALS = not _env_flag("ECHONOTE_DISABLE_REFINE")
 # the 4-core target: the accurate pass takes ~4-6 s, one utterance arrives
 # every ~5 s, so a depth of three rides out a burst without holding more than
 # a few MB of audio (each entry is at most 30 s of float32).
-REFINE_QUEUE_MAX = max(1, _env_int("ECHONOTE_REFINE_QUEUE_MAX", 3))
+# Accuracy beats latency here: with the accurate model at ~1.7x realtime, a
+# three-item queue dropped refinements during ordinary speech, which silently
+# left the *exported* text at live-model quality. The backlog is now measured
+# in seconds of held audio (~0.95 MB per 15 s), not in items, so a slow model
+# queues instead of losing work.
+REFINE_BACKLOG_SECONDS = max(30.0, _env_float("ECHONOTE_REFINE_BACKLOG_S", 240.0))
 
 # Upper bound on how long a closing session waits for pending refinements
 # before it says "done". Anything still queued keeps its provisional text.
-REFINE_DRAIN_TIMEOUT_S = _env_float("ECHONOTE_REFINE_DRAIN_TIMEOUT_S", 12.0)
+# 25 s covers two sentences of the accurate pass; longer would make "停止"
+# feel stuck, shorter would export live-model text.
+REFINE_DRAIN_TIMEOUT_S = _env_float("ECHONOTE_REFINE_DRAIN_TIMEOUT_S", 25.0)
+
+# Upper bound on that wait. The drain scales with what is actually queued
+# (the accurate pass is ~2.5x realtime), so a two-sentence backlog is waited
+# for instead of exported at live-model quality.
+REFINE_DRAIN_MAX_S = _env_float("ECHONOTE_REFINE_DRAIN_MAX_S", 60.0)
+
+# Domain words (names, product terms, jargon) the decoder should prefer.
+# Passed as ``hotwords``, not as part of the instruction prompt: hotwords bias
+# the token choice without the model being able to "answer" them, which is how
+# "回声笔记" survives a model that would otherwise write "回生笔记".
+HOTWORDS = os.getenv("ECHONOTE_HOTWORDS", "").strip() or None
 
 # --------------------------------------------------------------------------
 # Protocol limits (PRD §7.1, FR-038, D-06, D-12)

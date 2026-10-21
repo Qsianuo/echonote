@@ -479,17 +479,66 @@ def status() -> dict:
         "live_ready": bool(_live_ready.is_set() or _ready.is_set()),
         "live_error": _live_error,
         "refine": refine_enabled(),
+        # Why the second pass is off, so the UI can say something better than
+        # "nothing happens when I pick a model".
+        "refine_blocked": refine_blocked_reason(),
         "live_ms": live_ms(),
     }
+
+
+# The ``tiny`` model is the one entry in the catalog that gets *worse* with the
+# instruction prompt. Measured on the sample utterance, whole file:
+#   with prompt    1.96 s  "你好,这是回生笔记的实实语音时别特势。…开始入音。"
+#   without prompt 1.10 s  "你好,这是回生笔记的实实语音时别测试,…开始入音。"
+# It also answers the prompt by *repeating* it, which is how "请使用简体中文和
+# 标点符号转写。" ended up on screen as a caption. Every other size benefits
+# (base without the prompt drifts into Traditional Chinese), so the rule is
+# per-model rather than global.
+_NO_PROMPT_KEYS = frozenset({"tiny"})
+
+
+def _prompt_for(lang: str | None, model_key: str | None) -> str | None:
+    """The ``initial_prompt`` to use for this language and model."""
+    if lang != "zh" or not config.ASR_PROMPT_ZH:
+        return None
+    if model_key in _NO_PROMPT_KEYS:
+        return None
+    return config.ASR_PROMPT_ZH
+
+
+def _size_of(target: models.Target) -> int:
+    return target.spec.size_mb if target.spec is not None else 0
 
 
 def refine_enabled() -> bool:
     """True when finals get a second, more accurate pass.
 
-    Only useful when that pass runs a different model than the live caption;
-    otherwise it would burn a second decode for the same text.
+    Only useful when that pass runs a *better* model than the live caption;
+    otherwise it would burn a second decode for the same text. The size check
+    is not cosmetic: picking the 75 MB experiment tier as the final model used
+    to let it rewrite the 145 MB live model's output, and the caption went
+    from "今天天气特别差。" to "请点减减减请普通话录音" *after* being marked
+    已精修. A refinement may only ever improve the text.
     """
-    return bool(config.REFINE_FINALS and config.LIVE_CAPTIONS and live_is_separate())
+    if not (config.REFINE_FINALS and config.LIVE_CAPTIONS and live_is_separate()):
+        return False
+    return _size_of(config.model_target()) > _size_of(live_target())
+
+
+def refine_blocked_reason() -> str | None:
+    """Why refinement is off, or ``None`` when it is on (or switched off).
+
+    ``final_model_not_bigger`` is the one the user can act on: they picked a
+    model smaller than the live caption model, so the second pass would make
+    the text worse and is skipped.
+    """
+    if not (config.REFINE_FINALS and config.LIVE_CAPTIONS):
+        return "disabled"
+    if not live_is_separate():
+        return "single_model"
+    if _size_of(config.model_target()) <= _size_of(live_target()):
+        return "final_model_not_bigger"
+    return None
 
 
 def _live_engine():
@@ -514,7 +563,7 @@ def transcribe_live(audio: np.ndarray, language: str | None = None) -> str:
         return ""
 
     lang = None if not language or language == "auto" else language
-    prompt = (config.ASR_PROMPT_ZH or None) if lang == "zh" else None
+    prompt = _prompt_for(lang, _live_key)
 
     with lock:
         started = time.perf_counter()
@@ -581,13 +630,7 @@ def transcribe(audio: np.ndarray, language: str | None = None, fast: bool = Fals
         return ""
 
     lang = None if not language or language == "auto" else language
-    prompt = None
-    if lang == "zh":
-        # Bias towards Simplified Chinese with punctuation.
-        # Content-neutral: a prompt with real sentences leaks its own wording
-        # into the transcript, which is why this is an instruction, not an
-        # example sentence.
-        prompt = config.ASR_PROMPT_ZH or None
+    prompt = _prompt_for(lang, _loaded_key)
 
     with _infer_lock:
         started = time.perf_counter()
@@ -641,15 +684,49 @@ def _clean(text: str, prompt: str | None = None) -> str:
     return text
 
 
+# Shortest run of the instruction that counts as an echo. "普通话录音" (5) is
+# short enough to appear in real speech; "请使用简体中文" (7) is not.
+ECHO_MIN_CHARS = 6
+
+
+def _longest_shared_run(text: str, prompt: str, minimum: int) -> str:
+    """Longest substring of ``text`` that also occurs in ``prompt``."""
+    best = ""
+    for start in range(len(text)):
+        for end in range(len(text), start + len(best), -1):
+            if end - start < minimum:
+                break
+            piece = text[start:end]
+            if piece in prompt:
+                if len(piece) > len(best):
+                    best = piece
+                break
+    return best
+
+
 def _strip_echo(text: str, prompt: str) -> str:
-    """Remove a prefix of ``prompt`` that the model echoed back."""
+    """Remove the instruction the model echoed back into the transcript.
+
+    The echo is not always a prefix. A prefix check was all this did, and it
+    missed both shapes seen in the wild: ``tiny`` answered with the *tail* of
+    the instruction ("请使用简体中文和标点符号转写。") and with a garbled join
+    ("请点减减减请普通话录音"). Both contain a long verbatim run of the prompt,
+    so the rule is "remove long shared runs", not "remove the prefix".
+
+    Only the echoed runs are removed; whatever the user actually said stays,
+    even when the echo was the longer part.
+    """
     prompt = prompt.strip()
     if not text or not prompt:
         return text
-    limit = min(len(text), len(prompt))
-    # Longest overlap first; 5 characters is already unambiguous for the
-    # shipped instruction and avoids clipping a genuine "以下是" opening.
-    for size in range(limit, 4, -1):
-        if text.startswith(prompt[:size]):
-            return text[size:].lstrip(" ，,。.")
-    return text
+
+    remaining = text
+    while True:
+        run = _longest_shared_run(remaining, prompt, ECHO_MIN_CHARS)
+        if not run:
+            break
+        remaining = remaining.replace(run, "", 1)
+
+    # Only the punctuation left dangling at the *front* of what remains is
+    # dropped; a trailing "。" is part of the sentence the user actually said.
+    return remaining.lstrip(" ，,。.;；、!！?？")

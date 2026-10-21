@@ -72,6 +72,7 @@ def status(
     live_ready: bool = True,
     live_error: str | None = None,
     refine: bool = False,
+    refine_blocked: str | None = None,
     live_ms: int | None = None,
 ) -> dict:
     return {
@@ -102,6 +103,9 @@ def status(
         "live_ready": bool(live_ready),
         "live_error": live_error if live_error is None else str(live_error),
         "refine": bool(refine),
+        # None when refinement runs; otherwise why it does not, so the UI can
+        # explain a model choice that would have made the text worse.
+        "refine_blocked": None if refine_blocked is None else str(refine_blocked),
         # Median live decode time in ms — the number the user feels.
         "live_ms": None if live_ms is None else int(live_ms),
     }

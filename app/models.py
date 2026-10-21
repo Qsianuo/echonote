@@ -101,7 +101,7 @@ CATALOG: tuple[ModelSpec, ...] = (
         label="试验",
         size_mb=75,
         tier="speed",
-        note="只适合试跑链路，中文会输出繁体，准确率不可用",
+        note="本机样本 CER 34.5%（base 20.7%）：能出字，但会自己编词，不建议当定稿档",
     ),
 )
 

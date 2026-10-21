@@ -59,7 +59,7 @@ ROOT_DIR = _data_dir()
 # version, screenshots) must agree with APP_VERSION, never with the document.
 # --------------------------------------------------------------------------
 
-APP_VERSION = "0.11.0"
+APP_VERSION = "0.11.1"
 APP_STAGE = "tech-preview"
 PROTOCOL_VERSION = "2"
 

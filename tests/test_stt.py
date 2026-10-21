@@ -418,3 +418,56 @@ def test_live_target_falls_back_to_the_main_model(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "LIVE_MODEL", None)
     assert stt.live_target().key == "medium"
     assert stt.live_is_separate() is False
+
+
+# --------------------------------------------------------------------------
+# v0.11.1: the 75 MB tier must never make a caption worse
+# --------------------------------------------------------------------------
+
+
+def test_prompt_echo_is_stripped_even_when_it_is_the_tail_of_the_instruction():
+    """`tiny` answers the instruction instead of transcribing the audio.
+
+    Reported from the UI: a caption line read "请使用简体中文和标点符号转写。"
+    — the tail of ``ASR_PROMPT_ZH``, not anything the user said.
+    """
+    prompt = config.ASR_PROMPT_ZH
+    assert stt._clean("请使用简体中文和标点符号转写。", prompt) == ""
+    # A genuine sentence that merely starts with the same two characters stays.
+    assert stt._clean("以下是今天的会议记录。", prompt) == "以下是今天的会议记录。"
+
+
+def test_prompt_echo_is_stripped_from_the_middle_of_a_hypothesis():
+    prompt = config.ASR_PROMPT_ZH
+    text = "今天天气特别差。请使用简体中文和标点符号转写。"
+    assert stt._clean(text, prompt) == "今天天气特别差。"
+
+
+def test_tiny_gets_no_instruction_prompt(tmp_path, monkeypatch):
+    """Measured: the prompt costs tiny 44% more time *and* accuracy."""
+    assert stt._prompt_for("zh", "tiny") is None
+    assert stt._prompt_for("zh", "base") == config.ASR_PROMPT_ZH
+    # Other languages never get the Chinese instruction.
+    assert stt._prompt_for("en", "base") is None
+
+
+def test_refinement_is_skipped_when_the_final_model_is_smaller(tmp_path, monkeypatch):
+    """Picking the 75 MB tier as the final model used to rewrite a better caption."""
+    for name in ("faster-whisper-base", "faster-whisper-tiny", "faster-whisper-small"):
+        folder = tmp_path / name
+        folder.mkdir()
+        (folder / "model.bin").write_bytes(b"0" * (2 << 20))
+        (folder / "config.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(config, "MODEL_DIR", str(tmp_path))
+    monkeypatch.setattr(config, "LIVE_MODEL", None)
+
+    # tiny as the final model: live is base (145 MB), tiny is 75 MB.
+    monkeypatch.setattr(config, "MODEL_CHOICE", "tiny")
+    assert stt.live_target().key == "base"
+    assert stt.refine_enabled() is False
+    assert stt.refine_blocked_reason() == "final_model_not_bigger"
+
+    # small as the final model: the second pass is a real improvement.
+    monkeypatch.setattr(config, "MODEL_CHOICE", "small")
+    assert stt.refine_enabled() is True
+    assert stt.refine_blocked_reason() is None

@@ -8,7 +8,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![Whisper](https://img.shields.io/badge/faster--whisper-local%20STT-412991?style=flat-square&logo=openai&logoColor=white)](https://github.com/SYSTRAN/faster-whisper)
 [![License](https://img.shields.io/badge/License-MIT-64ffda?style=flat-square)](LICENSE)
-[![Stage](https://img.shields.io/badge/stage-v0.11.0%20tech%20preview-f0b429?style=flat-square)](#-延迟口径重要)
+[![Stage](https://img.shields.io/badge/stage-v0.11.1%20tech%20preview-f0b429?style=flat-square)](#-延迟口径重要)
 
 边说边出字 · 录音不上传 · 装好模型后完全离线 · 支持中英日韩等多语言
 
@@ -217,7 +217,7 @@ python tools/fetch_model.py --list
 
 | 模型 | 体积 | 整段 RTF（9 s） | 中文表现 | 适合 |
 |------|------|----------------|---------|------|
-| `tiny` | ~75 MB | 未测 | 差，会输出繁体 | 只用来验证链路通不通 |
+| `tiny` | ~75 MB | 0.14 | 本机样本 CER 34.5%，会自己编词 | 只用来验证链路通不通；不能当定稿档 |
 | **`base`** | ~145 MB | 0.12 | 本机样本 CER 20.7%，错字较多 | **实时字幕默认档**；单次解码 ~1.1 s |
 | **`small`** | ~464 MB | 0.41 | 本机样本 CER 17.2%，「实时」听成「时时」 | **定稿默认档**；4 核机器上单句 ~4 s |
 | `medium` | ~1.5 GB | 1.08 | 本机样本 CER 13.8%，与 turbo 相同但快 28% | 6 核以上，平衡选择 |

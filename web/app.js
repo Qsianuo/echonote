@@ -279,6 +279,16 @@
       );
     }
 
+    // Picking a model *smaller* than the live one used to let it rewrite the
+    // caption into something worse, and the row still said 已精修. The server
+    // now skips that pass; say why, otherwise the dropdown looks broken.
+    if (message.refine_blocked === 'final_model_not_bigger') {
+      notes.push(
+        '所选的「识别模型」比实时字幕用的模型更小，精修只会把文字改差，已跳过。' +
+          '想要更准，请选「快速」或更大的档位。'
+      );
+    }
+
     if (notes.length === 0) {
       el.speedNotice.hidden = true;
       el.speedNotice.textContent = '';

@@ -25,6 +25,7 @@
   const Wav = window.EchoNoteWav;
   const Audio = window.EchoNoteAudioStore;
   const Playback = window.EchoNotePlayback;
+  const Wave = window.EchoNoteWaveform;
 
   const el = {
     recordBtn: document.getElementById('record-btn'),
@@ -71,6 +72,17 @@
   };
 
   const HOTWORDS_KEY = 'echonote.hotwords';
+
+  // 波形几何只在初始化与 resize 时量（Waveform.measure）；逐帧绘制只读缓存，
+  // 不再和字幕滚动交替读写布局。
+  const wf = Wave.Waveform.create({
+    canvas: el.waveform,
+    host: el.waveform,
+    dprProvider: () => window.devicePixelRatio || 1,
+  });
+
+  // 字幕行索引：id -> { item, row }。替代每次遍历 el.finals.children 的线性查找。
+  const rowIndex = Wave.RowIndex.create();
 
   function loadHotwords() {
     try {
@@ -147,6 +159,7 @@
     playScrub: false,
     playInteracted: false, // 最近一次指针交互发生在播放条内
     playRowId: null, // 当前高亮的字幕行 id
+    lastWaveDraw: 0, // 上一帧波形的时间戳（30 fps 上限）
     playResume: false, // seek 收尾后是否继续播（供嵌套 seek 沿用）
     playSeekId: 0, // 每次 seek 的代号，晚到的 await 一看到代号变了就退出
   };
@@ -946,6 +959,7 @@
       clearError();
       setHint('正在录音 · 实时转写中');
       startTimer();
+      state.lastWaveDraw = 0; // 新一段录音从第一帧就画，别等 33 ms
       drawWaveform();
       updateRecordEnabled();
       // 录音中回放不可用：让播放条跟着录音状态变灰（updateExportState 里同步）。
@@ -989,7 +1003,7 @@
     cancelAnimationFrame(state.rafId);
     state.rafId = null;
     cleanupAudio();
-    drawIdleWaveform();
+    wf.drawIdle();
 
     el.timer.textContent = Expo.formatClock(durationMs() / 1000);
 
@@ -1045,6 +1059,7 @@
     state.audioBuffer = new Int16Array(0);
     state.finals = [];
     state.finalIds.clear();
+    rowIndex.clear();
     state.partial = '';
     state.lastPartialText = '';
     state.limitWarned80 = false;
@@ -1171,72 +1186,26 @@
 
   /* ─────────────────────────── waveform ─────────────────────────── */
 
-  function sizeCanvas() {
-    const dpr = window.devicePixelRatio || 1;
-    const rect = el.waveform.getBoundingClientRect();
-    const width = Math.max(1, Math.floor(rect.width * dpr));
-    const height = Math.max(1, Math.floor(rect.height * dpr));
-    if (el.waveform.width !== width || el.waveform.height !== height) {
-      el.waveform.width = width;
-      el.waveform.height = height;
-    }
-    return { dpr, width, height };
-  }
-
-  function drawIdleWaveform() {
-    const { dpr, width, height } = sizeCanvas();
-    const ctx = el.waveform.getContext('2d');
-    ctx.clearRect(0, 0, width, height);
-
-    const middle = height / 2;
-    ctx.strokeStyle = 'rgba(100, 255, 218, 0.38)';
-    ctx.lineWidth = 2 * dpr;
-    ctx.beginPath();
-    ctx.moveTo(0, middle);
-    ctx.lineTo(width, middle);
-    ctx.stroke();
-
-    ctx.fillStyle = 'rgba(100, 255, 218, 0.35)';
-    const step = width / 28;
-    for (let i = 1; i < 28; i += 1) {
-      const x = i * step;
-      const amp = (i % 3 === 0 ? 6 : 3) * dpr;
-      ctx.fillRect(x, middle - amp, Math.max(1, dpr), amp * 2);
-    }
-  }
-
-  function drawWaveform() {
+  /**
+   * 逐帧绘制。几何（canvas 像素尺寸、dpr、渐变、采样缓冲）全部由
+   * `Waveform` 在 `measure()` 时准备好并复用，这里只做两件事：把时域数据交给
+   * 它画，以及把重绘压在 30 fps 以内——波形是装饰，60/120 Hz 全速重绘看不出
+   * 差别，却会跟字幕滚动抢主线程。
+   */
+  function drawWaveform(now) {
     if (!state.recording || !state.analyser) return;
 
-    const { dpr, width, height } = sizeCanvas();
-    const ctx = el.waveform.getContext('2d');
-    const data = new Uint8Array(state.analyser.frequencyBinCount);
-    state.analyser.getByteTimeDomainData(data);
-
-    ctx.clearRect(0, 0, width, height);
-
-    const gradient = ctx.createLinearGradient(0, 0, width, 0);
-    gradient.addColorStop(0, 'rgba(100, 255, 218, 0.25)');
-    gradient.addColorStop(0.5, 'rgba(100, 255, 218, 0.95)');
-    gradient.addColorStop(1, 'rgba(100, 255, 218, 0.25)');
-
-    ctx.strokeStyle = gradient;
-    ctx.lineWidth = 2 * dpr;
-    ctx.beginPath();
-    const step = width / data.length;
-    for (let i = 0; i < data.length; i += 1) {
-      const value = data[i] / 128 - 1;
-      const x = i * step;
-      const y = height / 2 + value * (height * 0.34);
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
+    // prefers-reduced-motion: 画一帧定格，不再排下一帧（PRD §10.2）。
+    if (state.reduceMotion) {
+      wf.draw(state.analyser);
+      return;
     }
-    ctx.stroke();
 
-    // Respect prefers-reduced-motion: draw a single frozen frame instead of
-    // animating every cell (PRD §10.2, promoted to P1).
-    if (state.reduceMotion) return;
     state.rafId = requestAnimationFrame(drawWaveform);
+    const ts = typeof now === 'number' ? now : performance.now();
+    if (ts - state.lastWaveDraw < 33) return;
+    state.lastWaveDraw = ts;
+    wf.draw(state.analyser);
   }
 
   /* ─────────────────────────── transcript ─────────────────────────── */
@@ -1276,10 +1245,10 @@
    * reader never sees the transcript jump around.
    */
   function onRefine(message) {
-    const item = state.finals.find((entry) => entry.id === message.id);
-    if (!item) return;
+    const entry = rowIndex.get(message.id);
+    if (!entry) return;
+    const { item, row } = entry;
 
-    const row = findRow(item.id);
     const next = String(message.text || '').trim();
     const changed = next && next !== item.text;
 
@@ -1295,13 +1264,6 @@
       else setRowBadge(row, '', false);
     }
     updateExportState();
-  }
-
-  function findRow(id) {
-    for (const row of el.finals.children) {
-      if (row.dataset && row.dataset.id === id) return row;
-    }
-    return null;
   }
 
   /**
@@ -1345,6 +1307,7 @@
     row.appendChild(ts);
     row.appendChild(text);
     el.finals.appendChild(row);
+    rowIndex.set(item.id, { item, row });
 
     if (!item.stable) {
       // Accurate pass still running: say so instead of pretending this is
@@ -1379,6 +1342,7 @@
     if (ask && state.finals.length > 0 && !window.confirm(message)) return;
     state.finals = [];
     state.finalIds.clear();
+    rowIndex.clear();
     state.partial = '';
     state.lastPartialText = '';
     state.playRowId = null; // 行都没了，高亮记账一起清掉
@@ -1940,14 +1904,14 @@
     updatePlayUI();
   }
 
-  /** 字幕行高亮：定位行一律走 findRow(id)，下一任务换成 Map 时只改这一处。 */
+  /** 字幕行高亮：行一律经 rowIndex 取，不再遍历 el.finals.children。 */
   function highlightRow(id) {
     if (state.playRowId === id) return;
-    const previous = state.playRowId ? findRow(state.playRowId) : null;
-    if (previous) previous.classList.remove('is-playing');
+    const previous = state.playRowId ? rowIndex.get(state.playRowId) : null;
+    if (previous && previous.row) previous.row.classList.remove('is-playing');
     state.playRowId = id;
-    const row = id ? findRow(id) : null;
-    if (row) row.classList.add('is-playing');
+    const entry = id ? rowIndex.get(id) : null;
+    if (entry && entry.row) entry.row.classList.add('is-playing');
   }
 
   /** 左右方向键是否该接管：回放已开始（含暂停）且不在录音。 */
@@ -2255,7 +2219,9 @@
   }
 
   window.addEventListener('resize', () => {
-    if (!state.recording) drawIdleWaveform();
+    // 唯一重量测布局的时机：几何进了缓存，绘制路径里不再有 getBoundingClientRect。
+    wf.measure();
+    if (!state.recording) wf.drawIdle();
   });
 
   // The transcript is memory-only: refreshing loses it. Say so before unload
@@ -2278,7 +2244,8 @@
       typeof window.matchMedia === 'function' &&
       window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-    drawIdleWaveform();
+    wf.measure();
+    wf.drawIdle();
     updateExportState();
     reportUnfinishedRecordings();
     await loadConfig();

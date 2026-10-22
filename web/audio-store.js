@@ -4,6 +4,10 @@
  * `PcmLedger` 只做字节记账：录音时每次写入只需 O(1) 累加，替代原先
  * 每次 `Wav.byteLength(chunks)` 的 O(n) 遍历。纯逻辑，无浏览器 API，
  * 因此可以直接用 Node 测试。
+ *
+ * `createMemoryStore` 是 OPFS 不可用时的降级实现，接口与 app.js 里的
+ * OPFS store 保持一致（append/finish/read/toBlob/discard/totalBytes），
+ * 同样不依赖浏览器 API，所以降级路径也有自动化覆盖。
  */
 (function (root, factory) {
   const api = factory();
@@ -50,5 +54,67 @@
     },
   };
 
-  return { PcmLedger };
+  /**
+   * 降级实现：数据留在内存数组里，长录音会重新变成 O(时长) 占用。
+   * 与 OPFS store 同接口，`fallback` 恒为 true，调用方据此提示用户。
+   */
+  function createMemoryStore() {
+    const chunks = [];
+    let bytes = 0;
+    let discarded = false;
+
+    function assertReadable() {
+      if (discarded) throw new Error('录音已清空，无法读取');
+    }
+
+    const store = {
+      fallback: true,
+
+      get totalBytes() {
+        return bytes;
+      },
+
+      get sampleCount() {
+        return bytes / 2;
+      },
+
+      append(chunk) {
+        if (!(chunk instanceof Int16Array)) {
+          throw new TypeError('append() expects an Int16Array');
+        }
+        if (discarded || chunk.length === 0) return;
+        // 拷贝一份：调用方（sendFrame）随后还要把原 buffer 发给 WebSocket。
+        chunks.push(chunk.slice());
+        bytes += chunk.byteLength;
+      },
+
+      async finish() {
+        /* 内存里没有句柄需要收尾 */
+      },
+
+      flush() {
+        /* 内存实现无需刷盘 */
+      },
+
+      async read(from, to) {
+        assertReadable();
+        return (await store.toBlob()).slice(from, to).arrayBuffer();
+      },
+
+      async toBlob() {
+        assertReadable();
+        return new Blob(chunks);
+      },
+
+      async discard() {
+        discarded = true;
+        chunks.length = 0;
+        bytes = 0;
+      },
+    };
+
+    return store;
+  }
+
+  return { PcmLedger, createMemoryStore };
 });

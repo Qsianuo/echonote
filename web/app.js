@@ -16,6 +16,7 @@
 
   const Expo = window.EchoNoteExport;
   const Wav = window.EchoNoteWav;
+  const Audio = window.EchoNoteAudioStore;
 
   const el = {
     recordBtn: document.getElementById('record-btn'),
@@ -129,33 +130,17 @@
    */
 
   /**
-   * audio-store.js（Task 1 的 PcmLedger）是独立 UMD 模块，index.html 里还没有
-   * 对应的 script 标签，这里按需加载，免得录音路径依赖页面脚本顺序。
-   * 加载失败时返回 null，由调用方给出明确错误，而不是抛未捕获异常。
+   * audio-store.js（`PcmLedger` + `createMemoryStore`）由 index.html 静态引入，
+   * app.js 只负责接线：OPFS 落盘 + 失败降级到内存实现。
    */
-  let audioStoreModule = null;
-  function ensureAudioStoreLoaded() {
-    if (window.EchoNoteAudioStore) return Promise.resolve(window.EchoNoteAudioStore);
-    if (!audioStoreModule) {
-      audioStoreModule = new Promise((resolve) => {
-        const tag = document.createElement('script');
-        tag.src = 'audio-store.js';
-        tag.onload = () => resolve(window.EchoNoteAudioStore || null);
-        tag.onerror = () => resolve(null);
-        document.head.appendChild(tag);
-      });
-    }
-    return audioStoreModule;
-  }
-
   const AudioStore = {
     /**
      * 打开一段录音的落盘目标。任何失败都在内部降级为内存实现，调用方不需要
      * try/catch，也不会因为存储不可用而录不了音。
      *
      * @param {string} sessionKey 同一段录音（含连接中断后继续）复用的文件名
-     * @returns {Promise<{fallback: boolean, totalBytes: number,
-     *   append(int16: Int16Array): void, finish(): Promise<void>,
+     * @returns {Promise<{fallback: boolean, totalBytes: number, sampleCount: number,
+     *   append(int16: Int16Array): void, finish(): Promise<void>, flush(): void,
      *   read(from: number, to: number): Promise<ArrayBuffer>,
      *   toBlob(): Promise<Blob>, discard(): Promise<void>}>}
      */
@@ -164,7 +149,7 @@
         return await openOpfsStore(sessionKey, options.onError);
       } catch (error) {
         console.warn('[echonote] 本地文件落盘不可用，改用内存存储：', error);
-        return createMemoryStore();
+        return Audio.createMemoryStore();
       }
     },
   };
@@ -178,16 +163,36 @@
     const finalName = `${sessionKey}.pcm`;
 
     const worker = new Worker(STORAGE_WORKER_URL);
-    const pending = [];
+    // 请求按 id 关联，不依赖回复顺序：append 是即发即忘的，一旦按队列顺序
+    // 认领回复，Worker 报错就会把一个 append 的错算到后面的 finish/read 头上。
+    const pending = new Map();
+    let nextId = 1;
     let bytes = 0;
     let currentName = tmpName;
     let fileHandle = null;
     let finishedHandle = null;
     let finishing = null;
-    let closed = false;
+    let closed = false; // 已 finish 或已失败：不再接收 append
+    let failed = false; // 落盘失败：文件不可信，不可导出
 
     function reportError(error) {
       if (typeof onError === 'function') onError(error);
+    }
+
+    /** Worker 挂了或写盘出错：标记失败、清空等待者，之后 read/toBlob 直接报错。 */
+    function failStorage(message) {
+      if (failed) return;
+      failed = true;
+      closed = true;
+      const error = new Error(message || '存储写入失败');
+      pending.forEach((waiting) => waiting.reject(error));
+      pending.clear();
+      try {
+        worker.terminate();
+      } catch {
+        /* 已经没了 */
+      }
+      reportError(error.message);
     }
 
     worker.addEventListener('message', (event) => {
@@ -196,26 +201,26 @@
         bytes = message.offset; // Worker 报的已落盘字节，比本地累加更可信
         return;
       }
+      const waiting = pending.get(message.id);
+      if (waiting) pending.delete(message.id);
       if (message.type === 'error') {
-        const waiting = pending.shift();
         if (waiting) waiting.reject(new Error(message.error));
-        else reportError(message.error);
+        else failStorage(message.error); // 没有主的错误只能是 append 写失败
         return;
       }
-      const waiting = pending.shift();
       if (waiting) waiting.resolve(message);
     });
 
     worker.addEventListener('error', (event) => {
-      const error = new Error(event.message || '存储 Worker 出错');
-      while (pending.length) pending.shift().reject(error);
-      reportError(error.message);
+      failStorage(event.message || '存储 Worker 出错');
     });
 
     function request(payload) {
+      const id = nextId;
+      nextId += 1;
       return new Promise((resolve, reject) => {
-        pending.push({ resolve, reject });
-        worker.postMessage(payload);
+        pending.set(id, { resolve, reject });
+        worker.postMessage({ ...payload, id });
       });
     }
 
@@ -234,7 +239,10 @@
       try {
         await request({ type: 'finish' });
       } catch (error) {
-        reportError(error.message);
+        // flush/close 没走完就不能改名：半截文件一旦叫 .pcm，导出会得到坏 WAV，
+        // 下次启动也不会提示未完成。保留 .pcm.tmp，并标记本段不可导出。
+        failStorage(error.message);
+        return;
       }
       worker.terminate();
       try {
@@ -258,12 +266,19 @@
         return bytes;
       },
 
+      get sampleCount() {
+        return bytes / 2;
+      },
+
       append(int16) {
         if (!int16 || int16.length === 0 || closed) return;
         // 必须拷贝：紧随其后的 ws.send() 还要用原 buffer，转移所有权会发出空帧。
         const copy = int16.slice();
+        const id = nextId;
+        nextId += 1;
         bytes += copy.byteLength;
-        worker.postMessage({ type: 'append', buffer: copy.buffer }, [copy.buffer]);
+        // 带 id 但不进 pending：写盘失败时它是"无主错误"，会被当成致命错误处理。
+        worker.postMessage({ type: 'append', id, buffer: copy.buffer }, [copy.buffer]);
       },
 
       finish() {
@@ -271,8 +286,15 @@
         return finishing;
       },
 
+      /** 只 flush 不关闭：给 beforeunload 用（关句柄会让"取消离开"后的录音静默停写）。 */
+      flush() {
+        if (closed || failed) return;
+        worker.postMessage({ type: 'flush' });
+      },
+
       async read(from, to) {
         if (finishing) await finishing;
+        if (failed) throw new Error('本段录音保存失败，无法读取');
         if (finishedHandle) {
           const file = await finishedHandle.getFile();
           return file.slice(from, to).arrayBuffer();
@@ -283,6 +305,7 @@
 
       async toBlob() {
         if (finishing) await finishing;
+        if (failed) throw new Error('本段录音保存失败，无法导出');
         // File 本身就是 Blob：零拷贝，不把录音读进内存。
         if (finishedHandle) return finishedHandle.getFile();
         return new Blob([await store.read(0, bytes)]);
@@ -295,45 +318,6 @@
         } catch {
           /* 文件已经不在了 */
         }
-      },
-    };
-
-    return store;
-  }
-
-  /** 降级实现：数据留在内存数组里，长录音会重新变成 O(时长) 占用。 */
-  function createMemoryStore() {
-    const chunks = [];
-    let bytes = 0;
-
-    const store = {
-      fallback: true,
-
-      get totalBytes() {
-        return bytes;
-      },
-
-      append(int16) {
-        if (!int16 || int16.length === 0) return;
-        chunks.push(int16.slice());
-        bytes += int16.byteLength;
-      },
-
-      async finish() {
-        /* 内存里没有句柄需要收尾 */
-      },
-
-      async read(from, to) {
-        return (await store.toBlob()).slice(from, to).arrayBuffer();
-      },
-
-      async toBlob() {
-        return new Blob(chunks);
-      },
-
-      async discard() {
-        chunks.length = 0;
-        bytes = 0;
       },
     };
 
@@ -383,7 +367,7 @@
   function onStorageError(message) {
     if (state.storageErrorWarned) return;
     state.storageErrorWarned = true;
-    showNotice(`音频写入本地文件失败：${message}。建议立即停止录音并导出。`);
+    showNotice(`音频写入本地文件失败：${message}。已录内容可能不完整，请立即停止录音并检查磁盘空间。`);
   }
 
   /* ─────────────────────────── websocket ─────────────────────────── */
@@ -813,13 +797,12 @@
       await resetSession();
     }
 
-    const audioModules = await ensureAudioStoreLoaded();
-    if (!audioModules) {
+    if (!Audio) {
       showError('音频存储模块加载失败，请刷新页面重试');
       return;
     }
     if (!state.ledger || !continueSession) {
-      state.ledger = audioModules.PcmLedger.create({ maxBytes: MEMORY_BUDGET_BYTES });
+      state.ledger = Audio.PcmLedger.create({ maxBytes: MEMORY_BUDGET_BYTES });
     }
 
     const storageNotices = [];
@@ -840,6 +823,7 @@
       showError(`无法访问麦克风：${friendlyMediaError(error)}`);
       setHint('麦克风不可用，请在系统设置中允许麦克风');
       announce('麦克风不可用');
+      await releaseStore(); // 不留悬挂的 Worker / 句柄
       return;
     }
 
@@ -930,6 +914,7 @@
       showError(`音频初始化失败：${error.message || error.name}`);
       setHint('音频初始化失败，请刷新页面重试');
       cleanupAudio();
+      await releaseStore(); // 同上：早退不能把句柄留在半空
     }
   }
 
@@ -946,8 +931,16 @@
       state.ws.send(JSON.stringify({ type: 'flush' }));
     }
     // 收尾落盘（flush + close 后把 .tmp 改名成 .pcm）；不 await——导出与读取
-    // 会等同一个 promise，UI 不必挂在这里。
-    if (state.store) state.store.finish();
+    // 会等同一个 promise，UI 不必挂在这里。一声没录到就删掉空文件，
+    // 免得留下永远无人提示、也永远没人清理的 0 字节 .pcm（A8）。
+    if (state.store) {
+      if (state.ledger && state.ledger.sampleCount > 0) {
+        state.store.finish();
+      } else {
+        state.store.discard();
+        state.store = null; // 空文件已删，续录时重新打开，避免往废弃实例里写
+      }
+    }
 
     state.endedAt = new Date();
     stopTimer();
@@ -973,6 +966,23 @@
     if (!state.recordingStartedAt) return 0;
     const end = state.recording ? Date.now() : (state.endedAt || state.recordingStartedAt).getTime();
     return Math.max(0, end - state.recordingStartedAt.getTime());
+  }
+
+  /**
+   * 录音没真正开始就退出（拿不到麦克风 / AudioContext 起不来）时调用：
+   * 有音频就 finish 保下来（续录场景），一声没有就 discard 掉空文件，
+   * 两种情况都不留下悬挂的 Worker 与同步句柄。
+   */
+  async function releaseStore() {
+    const released = state.store;
+    state.store = null;
+    if (!released) return;
+    try {
+      if (state.ledger && state.ledger.sampleCount > 0) await released.finish();
+      else await released.discard();
+    } catch (error) {
+      console.warn('[echonote] 释放录音文件失败：', error);
+    }
   }
 
   async function resetSession() {
@@ -1395,7 +1405,7 @@
 
     if (format === 'wav') {
       if (!state.store || !state.ledger || state.ledger.sampleCount === 0) return;
-      const peakMib = Math.ceil((state.ledger.byteLength * 2) / 1048576);
+      const peakMib = Math.ceil(state.ledger.byteLength / 1048576);
       setHint(`正在导出 WAV，预计占用约 ${peakMib} MiB 内存…`);
       try {
         // 过渡实现：整体读成一段 PCM 再套 WAV 头，Task 4 换成流式拼接。
@@ -1705,11 +1715,13 @@
 
   // The transcript is memory-only: refreshing loses it. Say so before unload
   // instead of letting the user discover it afterwards (PRD R-10 / PR-06).
-  // 音频已经边录边落盘，这里刻意不 finish()：录音中被强关的会话应留成 .pcm.tmp，
-  // 下次启动由 reportUnfinishedRecordings() 提示，而不是当成完整录音。
+  // 音频已经边录边落盘，这里刻意不 finish()：finish 会关句柄，用户点「留下」
+  // 之后录音就静默停写了；flush 是无副作用的尽力而为，已写内容尽量刷到磁盘。
+  // 真正被强关的会话会留下 .pcm.tmp，下次启动由 reportUnfinishedRecordings() 提示。
   window.addEventListener('beforeunload', (event) => {
     const hasData = state.finals.length > 0 || (state.ledger ? state.ledger.sampleCount > 0 : false);
     if (!hasData) return;
+    if (state.recording && state.store) state.store.flush();
     event.preventDefault();
     event.returnValue = '';
   });

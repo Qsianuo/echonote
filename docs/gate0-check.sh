@@ -52,6 +52,7 @@ expect_hit "16 model switch documented"          "识别模型"              REA
 expect_empty "17 audioChunks fully removed"      "audioChunks"            web/
 expect_hit   "18 preroll documented"             "ECHONOTE_VAD_PREROLL_MS" README.md
 expect_hit   "19 timing message documented"      '"type":"timing"'        README.md
+expect_empty "20 no false 'not written to disk' claim" "不写入磁盘"        README.md web/
 
 if [ "$fail" -eq 0 ]; then
   echo "----"

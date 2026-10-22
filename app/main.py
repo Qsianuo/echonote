@@ -24,7 +24,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from . import config, models, protocol, stt
+from . import asr_sherpa, config, models, protocol, stt
 from .live import LiveCaptioner
 from .timing import TurnTiming
 from .vad import Segmenter
@@ -189,7 +189,7 @@ def switch_model(payload: dict) -> dict:
 def get_config() -> dict:
     target = config.model_target()
     live = stt.live_target()
-    return {
+    payload = {
         "version": config.APP_VERSION,
         "stage": config.APP_STAGE,
         "protocol": protocol.PROTOCOL_VERSION,
@@ -230,6 +230,23 @@ def get_config() -> dict:
         "hotwords": config.HOTWORDS or "",
         "max_sessions": config.MAX_CONCURRENT_SESSIONS,
     }
+    if config.ASR_BACKEND == "sherpa":
+        # The whisper names describe a model that is not loaded and will not
+        # be used. Reporting "large-v3-turbo / 高精度" while the sherpa
+        # recognizer does the work is what put a wrong model name in the
+        # exported transcript header and in the model picker.
+        payload.update(
+            model=asr_sherpa.label(),
+            model_label="sherpa 流式",
+            model_key="sherpa",
+            offline_ready=asr_sherpa.is_installed(),
+            live_model=asr_sherpa.label(),
+            live_model_key="sherpa",
+            live_model_label="sherpa 流式",
+            live_separate=False,
+            refine=False,
+        )
+    return payload
 
 
 # --------------------------------------------------------------------------

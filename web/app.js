@@ -145,6 +145,11 @@
     modelReady: false,
     modelKey: '',
     modelName: '加载中',
+    // The backend's /api/ready is the authority on which model is in use;
+    // /api/config may describe a different (configurable) model. Once the
+    // status has named the model, /api/config must not overwrite it --
+    // that race is what put a whisper model name in a sherpa transcript.
+    modelNameFromStatus: false,
     offlineReady: false,
     recording: false,
     recordingStartedAt: null,
@@ -470,9 +475,11 @@
    * 启动时只报告、不处理上次残留的 .pcm.tmp：不删除、不改名、不计入字节数，
    * 因为半截文件既不是可播放的录音，也可能是用户唯一的一份素材。
    *
-   * 判据是「有 .pcm.tmp 且没有同名 .pcm」，而不是只看 .tmp 后缀：Firefox /
-   * Safari 没有 move()，正常结束的录音在改名失败时也会留在 .tmp，只按后缀报警
-   * 会把一段完整录音误报成「上次未完成」。
+   * 判据是「同名 .pcm 不存在，或比 .pcm.tmp 还短」，而不是只看后缀：
+   * Firefox / Safari 没有 move()，正常结束的录音在改名失败时也会留在 .tmp；
+   * 而改名中途失败可能留下一个比 .tmp 更短的 .pcm（旧的或半截的），此时真正
+   * 完整的那份是 .tmp，必须报出来。只按「.pcm 存在就跳过」会把一段残缺
+   * 录音误判成完整。
    */
   async function reportUnfinishedRecordings() {
     try {
@@ -482,9 +489,14 @@
       for await (const entry of root.values()) {
         if (entry.kind !== 'file' || !entry.name.endsWith('.pcm.tmp')) continue;
         const finalName = `${entry.name.slice(0, -'.pcm.tmp'.length)}.pcm`;
+        const tmpSize = (await entry.getFile()).size;
         const finished = await root.getFileHandle(finalName).catch(() => null);
-        if (finished) continue; // 已经是完整录音，只是名字还没换过来
-        bytes += (await entry.getFile()).size;
+        if (finished) {
+          // 正式文件不比 .tmp 短，才说明它才是完整的那一份。
+          const finalSize = (await finished.getFile()).size;
+          if (finalSize >= tmpSize) continue;
+        }
+        bytes += tmpSize;
       }
       if (bytes <= 0) return;
       const minutes = Math.max(1, Math.round(bytes / 2 / SAMPLE_RATE / 60));
@@ -723,6 +735,7 @@
 
     state.modelReady = !!message.ready;
     state.modelName = modelDisplayName(message.model, message.model_label);
+    state.modelNameFromStatus = true;
     el.modelTag.textContent = state.modelReady
       ? modelRoleText(message)
       : state.modelName;
@@ -791,9 +804,15 @@
       if (!res.ok) return;
       const config = await res.json();
 
-      state.modelName = modelDisplayName(config.model, config.model_label);
-      el.modelTag.textContent = state.modelName;
-      el.footerModel.textContent = state.modelName;
+      // The status endpoint is authoritative about the model actually in
+      // use; only fill in the name from /api/config when the status has not
+      // named one yet. Overwriting here would put the config-time model
+      // (whisper) into a sherpa transcript header.
+      if (!state.modelNameFromStatus) {
+        state.modelName = modelDisplayName(config.model, config.model_label);
+        el.modelTag.textContent = state.modelName;
+        el.footerModel.textContent = state.modelName;
+      }
 
       // The server ships a starter glossary (the app's own vocabulary). Use it
       // only when the user has never touched the field — a cleared box must

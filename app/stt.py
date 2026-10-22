@@ -139,6 +139,12 @@ def live_target() -> models.Target:
 
 def live_is_separate() -> bool:
     """True when the live caption model is not the final model."""
+    if config.ASR_BACKEND == "sherpa":
+        # One streaming recognizer serves both roles. There is no second
+        # model, so the size comparison below would compare two whisper
+        # models that are not even loaded — and "refine" would then re-decode
+        # every utterance with the same weights it was just decoded with.
+        return False
     main = config.model_target()
     live = live_target()
     if live.key != main.key:
@@ -732,7 +738,7 @@ def transcribe_live(
     audio = _prepare(audio)
 
     if config.ASR_BACKEND == "sherpa":
-        text = asr_sherpa.transcribe(audio, lang)
+        text = asr_sherpa.transcribe(audio, lang, hotwords=hotwords or config.HOTWORDS)
         return "" if text is None else _clean(text, None)
 
     if config.ASR_REMOTE:
@@ -831,7 +837,7 @@ def transcribe(
     audio = _prepare(audio)
 
     if config.ASR_BACKEND == "sherpa":
-        text = asr_sherpa.transcribe(audio, lang)
+        text = asr_sherpa.transcribe(audio, lang, hotwords=hotwords or config.HOTWORDS)
         return "" if text is None else _clean(text, None)
 
     if config.ASR_REMOTE:

@@ -1,4 +1,4 @@
-"""EchoNote wire protocol v3.
+"""EchoNote wire protocol v4.
 
 Every message the server emits is built here so the contract lives in one
 place and can be asserted by the contract tests (PRD RG-04). The client is
@@ -7,12 +7,18 @@ allowed to receive unknown *warning* codes without crashing, but unknown
 
 v2 -> v3
 --------
-``final`` is no longer necessarily the last word on an utterance: the live
-caption model emits it the moment the pause is detected, and the accurate
-model may replace it a few seconds later with a ``refine`` message that
-carries the same ``id``. Clients that do not understand ``refine`` still show
-the provisional text, so the change is additive in spirit — but the message
-set changed, so the version string did too.
+``final`` stopped being the last word on an utterance: the live caption model
+emits it the moment the pause is detected, and the accurate model may replace
+it a few seconds later with a ``refine`` message carrying the same ``id``.
+Clients that do not understand ``refine`` still show the provisional text.
+
+v3 -> v4
+--------
+Adds ``timing``: one message per utterance (and one more after its ``refine``)
+carrying the milliseconds between the end of speech and each visible
+milestone. It is purely diagnostic — a client that ignores it loses nothing
+but the performance numbers, which is why the change is additive in spirit
+and versioned anyway: the message set changed again.
 """
 
 from __future__ import annotations
@@ -20,7 +26,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-PROTOCOL_VERSION = "3"
+PROTOCOL_VERSION = "4"
 
 ERROR_CODES = frozenset(
     {
@@ -160,6 +166,33 @@ def refine(*, final_id: str, epoch: int, text: str, start: float, end: float) ->
     }
 
 
+def timing(
+    *,
+    epoch: int,
+    turn_id: str,
+    speech_finished_at: float,
+    segments: dict[str, float],
+) -> dict:
+    """Per-utterance latency report (v4).
+
+    ``speech_finished_at`` is a ``time.perf_counter()`` reading — monotonic, so
+    it is only meaningful subtracted from another mark on the same machine, not
+    as a date. ``segments`` maps a fixed set of ``to_<milestone>_ms`` keys to
+    milliseconds *after* that instant; a milestone that never happened is
+    absent rather than null, so "not measured" can never be read as "0 ms".
+
+    Values are passed through as given (``app.timing.TurnTiming.payload``
+    rounds them); :func:`validate` is what rejects a non-number or a negative.
+    """
+    return {
+        "type": "timing",
+        "epoch": int(epoch),
+        "turn_id": str(turn_id),
+        "speech_finished_at": speech_finished_at,
+        "segments": {str(key): value for key, value in dict(segments).items()},
+    }
+
+
 def error(*, code: str, message: str, retryable: bool = False) -> dict:
     if code not in ERROR_CODES:
         raise ProtocolError(f"unknown error code: {code}")
@@ -205,6 +238,12 @@ _REQUIRED: dict[str, dict[str, type | tuple[type, ...]]] = {
     },
     "error": {"code": str, "message": str, "retryable": bool},
     "warning": {"code": str, "dropped_ms": int},
+    "timing": {
+        "epoch": int,
+        "turn_id": str,
+        "speech_finished_at": (int, float),
+        "segments": dict,
+    },
     "done": {},
 }
 
@@ -250,5 +289,16 @@ def validate(message: dict) -> dict:
             raise ProtocolError(f"unknown warning code: {message['code']}")
         if message["dropped_ms"] < 0:
             raise ProtocolError("warning.dropped_ms must be >= 0")
+    elif kind == "timing":
+        if message["epoch"] < 1:
+            raise ProtocolError("timing.epoch must be >= 1")
+        for name, value in message["segments"].items():
+            # The generic type check above cannot reach inside the dict, and
+            # ``bool`` is a subclass of ``int``: without the explicit guard a
+            # ``True`` segment would pass and read as "1.0 ms".
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ProtocolError(f"timing.segments[{name!r}] must be a number")
+            if value < 0:
+                raise ProtocolError(f"timing.segments[{name!r}] must be >= 0")
 
     return message

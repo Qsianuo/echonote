@@ -379,6 +379,11 @@ MAX_RECORD_WARN_RATIO = 0.8
 # never downloads a model.
 PRELOAD = not _env_flag("ECHONOTE_SKIP_PRELOAD")
 
+# The `timing` message is always sent; this only adds a greppable
+# ``[TURN_TIMING]`` log line, which is how a benchmark run is compared later
+# without a browser attached.
+TIMING_LOG = _env_flag("ECHONOTE_TIMING_LOG")
+
 # Client-side memory budget for the in-flight recording (FR-045).
 RECORDING_MEMORY_BUDGET_BYTES = 200 * 1024 * 1024
 

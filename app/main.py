@@ -1,6 +1,6 @@
 """EchoNote server: streaming audio in, live transcripts out.
 
-Protocol v2 (see ``app/protocol.py``). The server owns segmentation and
+Protocol v4 (see ``app/protocol.py``). The server owns segmentation and
 inference; the client owns the recording timeline. Each WebSocket session
 carries an ``epoch`` and an ``origin_ms`` so that reconnects do not reset
 timestamps (PRD FR-010 / FR-040).
@@ -26,6 +26,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import config, models, protocol, stt
 from .live import LiveCaptioner
+from .timing import TurnTiming
 from .vad import Segmenter
 
 logging.basicConfig(
@@ -260,6 +261,13 @@ class StreamingSession:
         self._dropped_samples = 0
         self._warned_backlog = False
 
+        # Latency instrumentation. ``_first_text_at`` is stamped by the
+        # caption thread while the user is still talking, i.e. before the
+        # turn's TurnTiming exists; ``_timings`` holds the marks of turns
+        # whose refinement has not landed yet, keyed by ``final.id``.
+        self._first_text_at: float | None = None
+        self._timings: dict[str, TurnTiming] = {}
+
         self._live: LiveCaptioner | None = None
         if config.LIVE_CAPTIONS:
             self._live = LiveCaptioner(
@@ -388,6 +396,12 @@ class StreamingSession:
 
     def _emit_partial(self, text: str, start_s: float) -> None:
         self._last_partial = text
+        if self._first_text_at is None:
+            # First caption of this utterance (runs on the caption thread, so
+            # it lands *before* the VAD closes the segment). Stamped here and
+            # applied to the TurnTiming that ``_complete`` builds, because the
+            # origin of the clock — the end of speech — is not known yet.
+            self._first_text_at = time.perf_counter()
         self._emit(protocol.partial(text=text, epoch=self.epoch, start=start_s))
 
     # ------------------------------------------------------------- worker
@@ -456,6 +470,19 @@ class StreamingSession:
         """Turn one finished utterance into a ``final`` (+ a refinement)."""
         audio = event["audio"]
         start, end = event["start"], event["end"]
+        # Mark 1/4: the clock starts when the VAD closed the utterance, which
+        # is the instant the user starts feeling like they are waiting.
+        # ``finished_at`` is a perf_counter reading (Task 7) — monotonic, so it
+        # is only ever subtracted, never rendered as a time of day.
+        turn = TurnTiming(event["finished_at"])
+        turn.mark("vad_done")
+        # Mark 2/4: the first partial was stamped on the caption thread, before
+        # this object existed. Consuming it clears the flag for the next turn —
+        # including on every early return below, which is why it is taken here
+        # and not next to the emit.
+        first_text_at, self._first_text_at = self._first_text_at, None
+        if first_text_at is not None:
+            turn.mark("first_text", first_text_at)
         self._foreground = True
         try:
             if self._live is not None:
@@ -508,7 +535,14 @@ class StreamingSession:
             )
         )
         self._last_final_text = text
+        # Mark 3/4: the text is on screen. Reported once per turn — this is
+        # the ``to_final_text_ms`` number that every latency claim is about.
+        turn.mark("final_text")
+        self._emit_timing(final_id, self.epoch, turn)
         if not stable:
+            # Kept until the accurate pass lands (``_refine_loop``) or the job
+            # is dropped, whichever comes first.
+            self._timings[final_id] = turn
             self._enqueue_refine(final_id, audio, start, end)
 
     # ------------------------------------------------------------- refine
@@ -529,6 +563,10 @@ class StreamingSession:
                     0.0, self._refine_seconds - len(dropped[1]) / config.SAMPLE_RATE
                 )
                 self._refine_dropped += 1
+                # Its refinement will never land, so its latency marks are
+                # dead weight; dropping them keeps ``_timings`` bounded by the
+                # queue instead of by the length of the recording.
+                self._timings.pop(dropped[0], None)
                 self._refine.task_done()
                 if not self._warned_refine:
                     self._warned_refine = True
@@ -567,6 +605,9 @@ class StreamingSession:
                     )
                 self._refine.task_done()
             text = (text or "").strip()
+            # Taken before the emit: a refinement that decodes to nothing has
+            # no marks to report, and leaving them behind would leak.
+            turn = self._timings.pop(final_id, None)
             if not text:
                 continue
             try:
@@ -578,6 +619,11 @@ class StreamingSession:
                     final_id=final_id, epoch=epoch, text=text, start=start, end=end
                 )
             )
+            if turn is not None:
+                # Mark 4/4: the accurate text replaced the provisional one.
+                # The second and last ``timing`` message of this turn.
+                turn.mark("refined")
+                self._emit_timing(final_id, epoch, turn)
 
     def _drain_refine(self, timeout: float) -> None:
         with self._refine_lock:
@@ -597,6 +643,26 @@ class StreamingSession:
         # Stop the thread; anything still queued after the deadline keeps the
         # provisional text, which is exactly what `stable: false` promised.
         self._refine.put(None)
+
+    def _emit_timing(self, turn_id: str, epoch: int, turn: TurnTiming) -> None:
+        """Report one turn's latency breakdown (v4 ``timing`` message).
+
+        The only place a ``timing`` message is built. That is what bounds a
+        turn to two of them — one after its ``final``, one after its
+        ``refine`` — because those are the only two call sites, and each runs
+        at most once per turn id.
+        """
+        payload = turn.payload(turn_id=turn_id, epoch=epoch)
+        if config.TIMING_LOG:
+            log.info("[TURN_TIMING] %s", json.dumps(payload, ensure_ascii=False))
+        self._emit(
+            protocol.timing(
+                epoch=payload["epoch"],
+                turn_id=payload["turn_id"],
+                speech_finished_at=payload["speech_finished_at"],
+                segments=payload["segments"],
+            )
+        )
 
     def _emit(self, message: dict) -> None:
         protocol.validate(message)

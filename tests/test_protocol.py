@@ -1,4 +1,4 @@
-"""RG-04: protocol v3 contract.
+"""RG-04: protocol v4 contract.
 
 Every message the server can emit must be constructible, valid, and reject
 the mistakes we actually made before (missing codes, reset ids, end < start).
@@ -129,3 +129,67 @@ def test_refine_rejects_empty_text():
 
 def test_refine_backlog_warning_is_whitelisted():
     protocol.validate(protocol.warning(code="refine_backlog_dropped", dropped_ms=0))
+
+
+# --------------------------------------------------------------------------
+# v4: per-turn latency report
+# --------------------------------------------------------------------------
+
+
+def test_protocol_is_at_version_four():
+    assert protocol.PROTOCOL_VERSION == "4"
+    assert protocol.status(ready=True, model="small")["protocol"] == "4"
+
+
+def test_timing_message_validates():
+    msg = protocol.timing(
+        epoch=1,
+        turn_id="1-1",
+        speech_finished_at=100.0,
+        segments={"to_first_text_ms": 2000.0},
+    )
+    assert protocol.validate(msg)["type"] == "timing"
+    assert msg["segments"] == {"to_first_text_ms": 2000.0}
+
+
+def test_timing_accepts_an_empty_segment_map():
+    """Every turn emits a timing message, even one that measured nothing."""
+    msg = protocol.timing(epoch=1, turn_id="1-2", speech_finished_at=1.5, segments={})
+    assert protocol.validate(msg)["segments"] == {}
+
+
+def test_timing_rejects_negative_segment():
+    with pytest.raises(protocol.ProtocolError):
+        protocol.validate(
+            {
+                "type": "timing",
+                "epoch": 1,
+                "turn_id": "1-1",
+                "speech_finished_at": 100.0,
+                "segments": {"x": -1},
+            }
+        )
+
+
+@pytest.mark.parametrize("bad", [None, "2000", True, [1]])
+def test_timing_rejects_non_numeric_segments(bad):
+    msg = protocol.timing(
+        epoch=1, turn_id="1-1", speech_finished_at=100.0, segments={"to_first_text_ms": 1.0}
+    )
+    msg["segments"]["to_first_text_ms"] = bad
+    with pytest.raises(protocol.ProtocolError):
+        protocol.validate(msg)
+
+
+def test_timing_rejects_a_missing_field():
+    msg = protocol.timing(epoch=1, turn_id="1-1", speech_finished_at=100.0, segments={})
+    del msg["segments"]
+    with pytest.raises(protocol.ProtocolError):
+        protocol.validate(msg)
+
+
+def test_timing_rejects_a_bool_timestamp():
+    msg = protocol.timing(epoch=1, turn_id="1-1", speech_finished_at=100.0, segments={})
+    msg["speech_finished_at"] = True
+    with pytest.raises(protocol.ProtocolError):
+        protocol.validate(msg)

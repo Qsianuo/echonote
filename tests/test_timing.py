@@ -1,0 +1,190 @@
+"""RG-09 (latency): every turn reports where its milliseconds went.
+
+The point of this module is that "did the optimization help?" becomes a
+number in a log line instead of an opinion, so the tests pin the two things
+that make the number trustworthy: the origin of the clock (the moment speech
+ended) and the shape of the wire payload (absent, never null).
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import time
+
+import numpy as np
+import pytest
+from fastapi.testclient import TestClient
+
+from app import config, main, protocol, stt
+from app.timing import TurnTiming
+from conftest import FRAME, speech
+
+
+def test_marks_are_relative_to_speech_finished():
+    t = TurnTiming(speech_finished_at=100.0)
+    t.mark("vad_done", 100.9)
+    t.mark("first_text", 102.14)
+    assert t.since("vad_done") == pytest.approx(900.0)
+    assert t.since("first_text") == pytest.approx(2140.0)
+
+
+def test_missing_mark_returns_none():
+    t = TurnTiming(speech_finished_at=100.0)
+    assert t.since("never_happened") is None
+
+
+def test_payload_omits_unmeasured_segments():
+    t = TurnTiming(speech_finished_at=100.0)
+    t.mark("first_text", 102.0)
+    p = t.payload(turn_id="1-1", epoch=1)
+    assert p["segments"] == {"to_first_text_ms": 2000.0}
+    assert "to_final_text_ms" not in p["segments"]
+
+
+def test_payload_maps_every_measured_mark_to_its_key():
+    t = TurnTiming(speech_finished_at=100.0)
+    t.mark("vad_done", 100.0)
+    t.mark("first_text", 100.214)
+    t.mark("final_text", 102.9801)
+    t.mark("refined", 104.5)
+    p = t.payload(turn_id="2-3", epoch=2)
+    assert p == {
+        "type": "timing",
+        "epoch": 2,
+        "turn_id": "2-3",
+        "speech_finished_at": 100.0,
+        # One decimal place: sub-100 µs is noise, and the log line has to
+        # stay readable without a formatting step at every call site.
+        "segments": {
+            "to_first_text_ms": 214.0,
+            "to_final_text_ms": 2980.1,
+            "to_refined_ms": 4500.0,
+        },
+    }
+    # ``vad_done`` is an anchor for the log line, not a wire segment.
+    assert "to_vad_done_ms" not in p["segments"]
+
+
+def test_payload_never_uses_null_for_a_missing_mark():
+    t = TurnTiming(speech_finished_at=100.0)
+    p = t.payload(turn_id="1-1", epoch=1)
+    assert p["segments"] == {}
+    assert None not in p["segments"].values()
+
+
+def test_a_caption_that_beats_the_pause_is_reported_as_zero():
+    """``first_text`` is stamped while the user is still talking.
+
+    The origin is the *end* of speech, so a live caption that was already on
+    screen when the pause was detected lands before the origin. The wire
+    contract forbids negative delays (``protocol.validate``), and a negative
+    "delay" is not a thing the product can act on, so the payload floors it at
+    zero — "already there when you stopped". ``since`` keeps the honest sign
+    for anyone measuring onset latency.
+    """
+    t = TurnTiming(speech_finished_at=100.0)
+    t.mark("first_text", 98.8)
+    assert t.since("first_text") == pytest.approx(-1200.0)
+    assert t.payload(turn_id="1-1", epoch=1)["segments"] == {"to_first_text_ms": 0.0}
+
+
+def test_mark_defaults_to_the_monotonic_clock():
+    t = TurnTiming(speech_finished_at=time.perf_counter())
+    t.mark("final_text")
+    delta = t.since("final_text")
+    assert delta is not None and 0.0 <= delta < 1000.0
+
+
+# --------------------------------------------------------------------------
+# Wiring: the session actually emits it, once per turn and not per partial
+# --------------------------------------------------------------------------
+
+
+def _wait_until_idle(timeout: float = 5.0) -> None:
+    deadline = time.monotonic() + timeout
+    while main.active_sessions() and time.monotonic() < deadline:
+        time.sleep(0.02)
+
+
+@pytest.fixture()
+def client():
+    with TestClient(main.app) as test_client:
+        _wait_until_idle()
+        yield test_client
+
+
+def _send_speech(ws, seconds: float) -> None:
+    samples = (speech(seconds) * 32767).astype(np.int16)
+    for start in range(0, len(samples) - FRAME + 1, FRAME):
+        ws.send_bytes(samples[start : start + FRAME].tobytes())
+
+
+def test_a_turn_reports_once_per_visible_milestone(client, monkeypatch, caplog):
+    """Two timing messages at most: one for the final, one for the refine.
+
+    The failure this guards against is the obvious implementation — emit a
+    timing message from ``_emit_partial`` — which would put one message per
+    caption update on the wire and turn a diagnostic into traffic.
+    """
+    monkeypatch.setattr(stt, "is_ready", lambda: True)
+    monkeypatch.setattr(stt, "transcribe_live", lambda audio, language=None, **_: "实时字幕")
+    monkeypatch.setattr(
+        stt, "transcribe", lambda audio, language=None, fast=False, **_: "精修字幕"
+    )
+    monkeypatch.setattr(stt, "refine_enabled", lambda: True)
+    # The opt-in log line is the half of this feature a benchmark run reads.
+    monkeypatch.setattr(config, "TIMING_LOG", True)
+    caplog.set_level(logging.INFO, logger="echonote")
+
+    with client.websocket_connect("/ws") as ws:
+        ws.receive_json()  # status
+        _send_speech(ws, 2.6)  # > UtteranceStream.MIN_FIRST_DECODE_S (2 s)
+        # Let the caption thread decode and emit *before* the pause is
+        # finalised: a partial emitted after ``finish()`` is suppressed by
+        # design, so without this wait the first-caption mark is legitimately
+        # absent and the assertion below would be testing the race.
+        time.sleep(0.6)
+        ws.send_text(json.dumps({"type": "flush"}))
+
+        messages: list[dict] = []
+        for _ in range(40):
+            messages.append(ws.receive_json())
+            if sum(1 for m in messages if m.get("type") == "timing") >= 2:
+                break
+
+    kinds = [m["type"] for m in messages]
+    timings = [m for m in messages if m["type"] == "timing"]
+    assert kinds.count("timing") == 2
+    assert kinds.count("final") == 1
+    assert kinds.count("refine") == 1
+    # The messages the naive implementation would key off: one per caption.
+    assert any(m.get("text") for m in messages if m["type"] == "partial")
+
+    final = next(m for m in messages if m["type"] == "final")
+    for message in timings:
+        assert message["turn_id"] == final["id"]
+        assert message["epoch"] == final["epoch"]
+        assert isinstance(message["speech_finished_at"], float)
+        assert set(message["segments"]) <= {
+            "to_first_text_ms",
+            "to_final_text_ms",
+            "to_refined_ms",
+        }
+        assert all(v >= 0 for v in message["segments"].values())
+
+    # A partial is on screen, so the first-caption mark exists; the refine has
+    # landed by the second message, so its mark does too.
+    assert "to_first_text_ms" in timings[0]["segments"]
+    assert "to_final_text_ms" in timings[0]["segments"]
+    assert "to_refined_ms" not in timings[0]["segments"]
+    # Same turn, later clock: the refine cannot precede the final.
+    assert timings[1]["segments"]["to_refined_ms"] >= timings[1]["segments"]["to_final_text_ms"]
+    protocol.validate(timings[1])
+
+    # One [TURN_TIMING] line per message, and it parses as the same payload.
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("[TURN_TIMING]")]
+    assert len(lines) == 2
+    logged = json.loads(lines[1].split(" ", 1)[1])
+    assert logged == timings[1]
+

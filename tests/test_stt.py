@@ -541,12 +541,23 @@ def test_normal_text_is_untouched_by_the_loop_guard():
 
 
 def test_peak_normalize_boosts_quiet_audio():
-    # 0.2 -> 0.95 is 4.75x, inside the 8x cap. The original 0.05 would need
+    # Two levels, not a constant array: with a flat buffer a "set the peak to
+    # target and leave everything else" implementation would pass, because
+    # every sample *is* the peak. The quiet part must come up by the same
+    # factor as the loud one — the whole buffer is scaled, not just its peak.
+    #
+    # 0.25 -> 0.95 is 3.8x, inside the 8x cap. The original 0.05 would need
     # 19x, so the cap — not the target — decides the result; that case is
     # test_peak_normalize_respects_max_gain's job.
-    x = np.full(16000, 0.2, dtype=np.float32)
+    loud = 5333
+    x = np.full(16000, 0.05, dtype=np.float32)
+    x[:loud] = 0.25
     y = stt._peak_normalize(x, 0.95, 8.0)
-    assert float(np.max(np.abs(y))) == pytest.approx(0.95, abs=1e-5)
+    peak = float(np.max(np.abs(y)))
+    quiet = float(np.max(np.abs(y[loud:])))
+    assert peak == pytest.approx(0.95, abs=1e-5)
+    assert quiet == pytest.approx(0.19, abs=1e-5)
+    assert quiet / peak == pytest.approx(float(x[loud]) / float(x[0]), abs=1e-6)
 
 
 def test_peak_normalize_respects_max_gain():
@@ -559,6 +570,23 @@ def test_peak_normalize_leaves_silence_alone():
     x = np.zeros(16000, dtype=np.float32)
     y = stt._peak_normalize(x, 0.95, 8.0)
     assert np.array_equal(y, x)
+
+
+def test_peak_normalize_ignores_room_noise_below_threshold():
+    # All-zero silence only pins ``peak == 0``: narrowing the guard to that
+    # would let 1e-5 of room noise through and multiply it by 8, which is
+    # precisely how a decoder starts inventing words out of a noise floor.
+    x = np.full(16000, 1e-5, dtype=np.float32)   # 典型底噪，低于 1e-4 阈值
+    y = stt._peak_normalize(x, 0.95, 8.0)
+    assert np.array_equal(y, x)                   # 不得放大
+
+
+def test_peak_normalize_does_boost_just_above_threshold():
+    # The other side of the same boundary: the guard must reject noise, not
+    # quietly become "never normalise anything".
+    x = np.full(16000, 2e-4, dtype=np.float32)    # 刚高于 1e-4
+    y = stt._peak_normalize(x, 0.95, 8.0)
+    assert float(np.max(np.abs(y))) > float(np.max(np.abs(x)))
 
 
 def test_peak_normalize_never_attenuates():

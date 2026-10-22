@@ -274,3 +274,39 @@ def test_end_timestamp_marks_the_last_voiced_frame():
     # end == 0.8 s (the last voiced frame), audio may be slightly longer.
     assert close(event["end"], 0.8)
     assert len(event["audio"]) >= _span_samples(event)
+
+
+def test_coda_followed_by_silence_is_not_mistaken_for_silence():
+    """A short soft coda + a long silence must not be trimmed as 'pure silence'.
+
+    Regression: the old test averaged RMS over the whole tail window, so a
+    300 ms trailing syllable followed by 700 ms of room tone averaged *below*
+    the gate and the coda was cut — the exact bug the user reported. The fix
+    is per-frame: one frame above the silence floor keeps the whole window.
+    """
+    segmenter = Segmenter()
+    # 1.0 s of loud speech, 0.3 s of a *soft* coda (0.006 RMS: below the
+    # 0.010 gate but above the silence floor), then 1.0 s of true silence.
+    soft_coda = np.full(int(SAMPLE_RATE * 0.3), 0.006, dtype=np.float32)
+    events = feed(
+        segmenter,
+        np.concatenate([speech(1.0), soft_coda, silence(1.0)]),
+    )
+
+    assert len(events) == 1
+    duration = len(events[0]["audio"]) / SAMPLE_RATE
+    # The coda is part of the utterance: the buffer must extend past the last
+    # *loud* frame by at least the coda's 0.3 s (plus the tail window it sits
+    # inside). The old bug cut this to ~0.
+    assert duration >= 1.0 + 0.3
+
+
+def test_pure_silence_tail_still_trimmed():
+    """The per-frame test must not over-correct: zero-RMS tail is still cut."""
+    segmenter = Segmenter()
+    events = feed(segmenter, np.concatenate([speech(1.0), silence(1.5)]))
+
+    assert len(events) == 1
+    duration = len(events[0]["audio"]) / SAMPLE_RATE
+    # 1 s of speech + up to 1 s of tail window, never the full 2.5 s.
+    assert 1.0 <= duration < 2.3

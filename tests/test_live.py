@@ -69,20 +69,21 @@ def test_apply_ignores_out_of_order_results():
     assert stream.text == "第一版"
 
 
-def test_covers_end_uses_a_small_float_tolerance():
-    """The tolerance is a float-equality buffer, not a policy.
+def test_covers_end_requires_the_buffer_not_just_the_voiced_end():
+    """``covers_end`` must reach the end of the buffer, not just ``end_s``.
 
-    The old 0.25 s window let ``finish`` treat a decode that stopped *before*
-    the final syllable as "already covered", so the tail of the sentence was
-    never re-decoded and went missing from the transcript.
+    The buffer deliberately runs past the last voiced frame (the soft coda);
+    a decode that stopped at ``end_s`` but not at the buffer end has *not*
+    heard the coda, so the final must re-decode instead of reusing the live
+    text and losing the trailing syllable.
     """
     stream = UtteranceStream()
-    stream.feed(speech(2.0))
+    stream.feed(speech(2.0) * 1)  # 2.0 s of buffer
+    stream.apply("你好", 1.5)  # decode only heard 1.5 s of it
+    assert stream.covers_end(1.5) is False  # buffer runs to 2.0 s
     stream.apply("你好", 2.0)
-    # 2.0 vs 2.05: covered (float tolerance). 2.0 vs 2.1: not covered — the
-    # decode must be run again so the tail syllable is not lost.
-    assert stream.covers_end(2.03) is True
-    assert stream.covers_end(2.1) is False
+    assert stream.covers_end(2.0) is True
+    assert stream.covers_end(2.03) is True  # float tolerance
     assert stream.covers_end(2.6) is False
 
 

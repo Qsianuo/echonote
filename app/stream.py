@@ -143,12 +143,15 @@ class UtteranceStream:
     def covers_end(self, end_s: float, tolerance_s: float = 0.05) -> bool:
         """True when the last decode already heard the end of the utterance.
 
-        Tolerance is a float-equality buffer, not a policy: a larger one (the
-        old 0.25 s) made ``finish`` treat a decode that stopped *before* the
-        final syllable as "already covered", so the tail of the sentence was
-        never re-decoded and went missing from the transcript.
+        ``end_s`` is the last *voiced* frame, but the buffer we hand to the
+        decoder deliberately runs past it by up to ``VAD_TAIL_KEEP_MS`` so the
+        soft coda is not lost. Treating "covered up to ``end_s``" as "covered
+        the whole buffer" is what let the coda through un-decoded: the live
+        caption stopped at the last loud frame and the final reused it. The
+        check therefore has to reach the end of the *buffer*, not just the end
+        of the voiced region.
         """
-        return self._covered_s >= end_s - tolerance_s
+        return self._covered_s >= max(end_s, self.duration_s) - tolerance_s
 
     def reset(self) -> None:
         self._audio = np.empty(0, dtype=np.float32)

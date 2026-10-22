@@ -90,8 +90,14 @@ class Segmenter:
         if not self.in_speech or not self.frames:
             return None
 
+        # Keep the same tail window as ``_finalize`` so the live caption sees
+        # the coda too. Clipping at ``last_speech_frame`` here was the other
+        # half of "the trailing syllable is missing": the partial never heard
+        # it, so the partial text ended early and the final had to re-decode
+        # from scratch.
         keep = self.last_speech_frame - self.segment_start_frame + 1
-        keep = max(1, min(keep, len(self.frames)))
+        tail_frames = max(1, int(config.VAD_TAIL_KEEP_MS / FRAME_MS))
+        keep = max(1, min(keep + tail_frames, len(self.frames)))
         audio = np.concatenate(self.frames[:keep])
         if len(audio) < self.sample_rate * 0.25:
             return None
@@ -171,15 +177,23 @@ class Segmenter:
         # ``last_speech_frame + 150 ms`` and threw the rest away, which is what
         # clipped the soft coda of a spoken Chinese sentence ("呢", "啊",
         # trailing nasal) and left single-character rows ("文") hanging at the
-        # end. The tail is kept unless it is clearly just silence: a tail whose
-        # RMS is far below the gate carries no speech and would only drag the
-        # decode out, so it is still trimmed back to the safe window.
+        # end. The tail is kept unless it is clearly just silence.
+        #
+        # The silence test is per-frame, not a mean over the whole tail
+        # window: a 300 ms trailing syllable followed by 700 ms of true
+        # silence averages *below* the gate and used to be misread as "pure
+        # silence", cutting the very coda we are trying to keep. One frame
+        # above the silence floor anywhere in the tail is enough to keep the
+        # whole window.
         keep = len(self.frames)
         tail_frames = max(1, int(config.VAD_TAIL_KEEP_MS / FRAME_MS))
         if keep > tail_frames:
             tail_audio = np.concatenate(self.frames[-tail_frames:])
-            tail_rms = float(np.sqrt(np.mean(np.square(tail_audio), dtype=np.float64)))
-            if tail_rms < self.base_threshold * 0.3:
+            # Silence floor: anything this low is room tone, not speech. Well
+            # below the VAD gate so a soft coda is never mistaken for it.
+            silence_floor = self.base_threshold * 0.15
+            tail_has_signal = bool(np.any(np.abs(tail_audio) > silence_floor))
+            if not tail_has_signal:
                 # Pure silence past the last voiced frame: trim back to the
                 # configured tail window, never further.
                 keep = min(

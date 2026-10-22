@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>echonote-dev-story · 公众号排版预览</title>
+<style>
+  body{margin:0;background:#eef0f2;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;-webkit-text-size-adjust:100%;}
+  .gzh-toolbar{position:fixed;top:0;left:0;right:0;height:54px;background:#ffffff;box-shadow:0 1px 10px rgba(0,0,0,.08);display:flex;align-items:center;justify-content:space-between;padding:0 16px;z-index:99;}
+  .gzh-hint{font-size:13px;color:#6b7280;line-height:1.4;}
+  .gzh-hint b{color:#111827;}
+  .gzh-copy{background:#059669;color:#fff;border:0;border-radius:9px;padding:10px 20px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 3px 10px rgba(5,150,105,.28);white-space:nowrap;transition:transform .08s,background .15s;}
+  .gzh-copy:hover{background:#047857;}
+  .gzh-copy:active{transform:translateY(1px);}
+  .gzh-toast{position:fixed;top:66px;left:50%;transform:translateX(-50%);background:#111827;color:#fff;padding:11px 20px;border-radius:10px;font-size:14px;font-weight:600;opacity:0;pointer-events:none;transition:opacity .25s;z-index:100;box-shadow:0 6px 20px rgba(0,0,0,.25);max-width:88vw;text-align:center;}
+  .gzh-toast.show{opacity:1;}
+  .gzh-stage{max-width:700px;margin:78px auto 64px;padding:0 8px;}
+  @media(max-width:520px){.gzh-hint{max-width:150px;}}
+</style>
+</head>
+<body>
+<div class="gzh-toolbar">
+  <span class="gzh-hint">👇 下方是排版效果 · 点右侧 <b>复制</b> 直接粘到公众号</span>
+  <button class="gzh-copy" id="gzhCopyBtn" onclick="gzhCopy()">📋 复制到公众号</button>
+</div>
+<div class="gzh-toast" id="gzhToast"></div>
+<div class="gzh-stage">
+  <div id="gzh-content">
+<section style="max-width:677px;margin:0 auto;padding:8px;box-sizing:border-box;background:#fdfdf8;color:#4d4f46;font-family:'IBM Plex Sans',-apple-system,system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;line-height:1.75;">
+
+  <!-- 1. 头图卡 -->
+  <section style="background:#fdfdf8;border:1px solid #bfc1b7;border-radius:6px;overflow:hidden;font-family:'IBM Plex Sans',-apple-system,system-ui,sans-serif;">
+    <section style="padding:28px 24px 22px;">
+      <section style="display:flex;align-items:center;gap:8px;margin-bottom:22px;">
+        <span style="width:8px;height:8px;background:#1e1f23;border-radius:50%;display:inline-block;overflow:hidden;vertical-align:middle;font-size:0;line-height:0;"><span leaf="">&nbsp;</span></span>
+        <span style="font-size:10px;font-weight:700;letter-spacing:3px;color:#65675e;"><span leaf="">ECHONOTE DEV LOG</span></span>
+        <span style="flex:1;height:1px;background:#bfc1b7;display:inline-block;overflow:hidden;vertical-align:middle;font-size:0;line-height:0;"><span leaf="">&nbsp;</span></span>
+        <span style="font-size:10px;color:#9ea096;font-weight:500;font-variant-numeric:tabular-nums;"><span leaf="">2026.10</span></span>
+      </section>
+      <section style="display:flex;align-items:stretch;gap:18px;">
+        <section style="flex:1;min-width:0;">
+          <p style="font-size:24px;font-weight:800;color:#23251d;margin:0 0 10px;line-height:1.15;letter-spacing:-0.75px;">
+            <span leaf="">&nbsp;</span><span style="color:#4d4f46;"><span leaf="">&nbsp;</span></span><span style="border-bottom:3px solid #e5e7e0;"><span leaf="">&nbsp;</span></span>
+          </p>
+          <p style="font-size:22px;font-weight:800;color:#23251d;margin:0 0 10px;line-height:1.25;letter-spacing:-0.5px;"><span leaf="">我们把一句「说到一半被吃掉三个字」的 bug，追到了声音进来的第 150 毫秒</span></p>
+          <section style="display:flex;align-items:center;gap:4px;margin-bottom:12px;">
+            <span style="width:22px;height:3px;background:#1e1f23;border-radius:2px;display:inline-block;overflow:hidden;vertical-align:middle;font-size:0;line-height:0;"><span leaf="">&nbsp;</span></span>
+            <span style="width:8px;height:3px;background:#bfc1b7;border-radius:2px;display:inline-block;overflow:hidden;vertical-align:middle;font-size:0;line-height:0;"><span leaf="">&nbsp;</span></span>
+          </section>
+          <p style="font-size:13px;color:#65675e;margin:0;line-height:1.7;"><span leaf="">EchoNote v0.12.0 开发复盘：一个本地实时语音转文字工具，从「能跑」到「敢用」，中间隔着无数个你原本以为一行代码就能解决的问题。</span></p>
+        </section>
+        <section style="flex-shrink:0;width:112px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#eeefe9;border:1px dashed #bfc1b7;border-radius:6px;padding:8px;">
+          <svg width="72" height="72" viewBox="0 0 64 64" aria-hidden="true" style="display:block;">
+            <ellipse cx="32" cy="36" rx="22" ry="18" fill="none" stroke="#4d4f46" stroke-width="2"></ellipse>
+            <circle cx="26" cy="30" r="3" fill="#4d4f46"></circle>
+            <circle cx="38" cy="30" r="3" fill="#4d4f46"></circle>
+            <path d="M28 40 Q32 44 36 40" fill="none" stroke="#4d4f46" stroke-width="1.5"></path>
+            <path d="M12 34 L8 28 M52 34 L56 28" stroke="#bfc1b7" stroke-width="2" stroke-linecap="round"></path>
+          </svg>
+          <span style="font-size:8px;font-weight:700;color:#9ea096;letter-spacing:1px;margin-top:4px;"><span leaf="">DOODLE</span></span>
+        </section>
+      </section>
+    </section>
+    <section style="background:#1e1f23;padding:11px 24px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+      <p style="font-size:12px;color:rgba(255,255,255,0.92);margin:0;font-weight:600;"><span leaf="">本地 · 实时 · 三条目标：不出本机、2.8s 首字幕、默认模型 CER 0%</span></p>
+      <section style="display:flex;gap:6px;flex-wrap:wrap;">
+        <span style="background:#e5e7e0;color:#23251d;padding:3px 8px;border-radius:4px;font-size:8px;font-weight:700;border:1px solid #bfc1b7;"><span leaf="">v0.12.0</span></span>
+        <span style="background:#e5e7e0;color:#23251d;padding:3px 8px;border-radius:4px;font-size:8px;font-weight:700;border:1px solid #bfc1b7;"><span leaf="">TECH PREVIEW</span></span>
+      </section>
+    </section>
+  </section>
+
+  <!-- 2. 开篇编者按 -->
+  <section style="margin-top:24px;">
+    <section style="background:#fdfdf8;border:1px solid #bfc1b7;border-radius:6px;overflow:hidden;font-family:'IBM Plex Sans',-apple-system,system-ui,sans-serif;">
+      <section style="padding:10px 16px;background:#1e1f23;display:flex;align-items:center;justify-content:space-between;gap:10px;">
+        <p style="margin:0;font-size:10px;font-weight:800;letter-spacing:2px;color:#ffffff;"><span leaf="">EDITOR'S NOTE</span></p>
+        <span style="font-size:10px;color:rgba(255,255,255,0.65);"><span leaf="">开篇</span></span>
+      </section>
+      <section style="padding:16px 18px 18px;background:#eeefe9;">
+        <p style="margin:0;font-size:14px;line-height:1.9;color:#4d4f46;text-align:justify;"><span leaf="">这是一个「为了省 100 毫秒而认真」的项目。EchoNote 想解决的事其实很小：开完会脑子里还热乎着，想把刚才讲的话录下来、转成文字、存成字幕，方便后面整理——但你不想联网。会议内容、未发表的想法、个人随笔，这些都不该被悄悄传到某台看不见的服务器上。这篇复盘不讲模型创新，只讲我们怎么把每一个「看起来一行代码」的地方真正理解清楚。</span></p>
+      </section>
+    </section>
+  </section>
+
+  <!-- 3. 第一章 -->
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <section style="display:flex;align-items:center;gap:14px;">
+        <section style="text-align:center;flex-shrink:0;">
+          <p style="margin:0;font-size:24px;font-weight:800;color:#23251d;line-height:1;letter-spacing:-2px;"><span leaf="">01</span></p>
+          <p style="margin:0;font-size:8px;font-weight:700;color:#9ea096;letter-spacing:2px;"><span leaf="">PART</span></p>
+        </section>
+        <span style="width:1px;height:36px;background:#bfc1b7;flex-shrink:0;display:inline-block;overflow:hidden;vertical-align:middle;font-size:0;line-height:0;"><span leaf="">&nbsp;</span></span>
+        <section>
+          <p style="margin:0 0 1px;font-size:17px;font-weight:800;color:#23251d;letter-spacing:0.2px;"><span leaf="">我们要做的是什么</span></p>
+          <p style="margin:0;font-size:11px;font-weight:600;color:#65675e;letter-spacing:1.2px;"><span leaf="">PROJECT BACKGROUND &amp; GOALS</span></p>
+        </section>
+      </section>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <span leaf="">事情要从一个不太复杂的场景说起：开完一场会，脑子里还热乎着，想把刚才讲的话录下来、转成文字、存成字幕，方便后面整理。但你不想联网——会议内容、未发表的想法、个人随笔，这些都不该被悄悄传到某台看不见的服务器上。</span>
+      </p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <span leaf="">市面上现有的工具大致两类：云端 API（快但要联网），或者本地 Whisper（准但要么卡要么重）。真正开箱即用、边说边出字幕、还完全离线的，反而少见。EchoNote 就是想补这个缺口。</span>
+      </p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <strong style="color:#23251d;"><span leaf="">核心目标只有三条：</span></strong>
+      </p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <ul style="margin:0;padding-left:22px;line-height:1.8;list-style-position:outside;">
+        <li style="margin-bottom:8px;font-size:15px;color:#4d4f46;list-style-type:disc;">
+          <section><strong style="color:#23251d;"><span leaf="">本地</span></strong><span leaf="">：音频不出本机。默认走本地 ASR，远程识别是可选的。</span></section>
+        </li>
+        <li style="margin-bottom:8px;font-size:15px;color:#4d4f46;list-style-type:disc;">
+          <section><strong style="color:#23251d;"><span leaf="">实时</span></strong><span leaf="">：说一句话，2.8–3.4 秒内首条字幕出现在屏幕上，1.0 秒内定稿。</span></section>
+        </li>
+        <li style="margin-bottom:8px;font-size:15px;color:#4d4f46;list-style-type:disc;">
+          <section><strong style="color:#23251d;"><span leaf="">准</span></strong><span leaf="">：默认模型（medium）在中文短句上 CER 0.0%（理想情况），不是「能看懂就行」的程度。</span></section>
+        </li>
+      </ul>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <span leaf="">技术栈也很朴素：Python 后端 + 浏览器前端 + WebAudio 录音 + faster-whisper / sherpa-onnx 双 ASR 后端。没有 GPU 依赖，一台普通笔记本就能跑。</span>
+      </p>
+    </section>
+  </section>
+
+  <!-- 重点观点卡 -->
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <section style="background:#fdfdf8;border-radius:6px;padding:16px 18px;border:1px solid #bfc1b7;">
+        <p style="font-size:14px;color:#4d4f46;margin:0;line-height:1.8;text-align:justify;">
+          <strong style="color:#23251d;border-bottom:3px solid #ed7b2f;"><span leaf="">目标听起来不大，但每一个都是「看起来一行代码，实际上一堆坑」。</span></strong>
+        </p>
+      </section>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <span leaf="">我们做了一个决定：</span><strong style="color:#23251d;"><span leaf="">不做创新，做严谨</span></strong><span leaf="">。模型用现成的，算法用成熟的，我们的精力全部投入到「把每个细节理解清楚并用测试钉死」。听起来很枯燥，但这恰恰是工具类项目能活下来的原因。</span>
+      </p>
+    </section>
+  </section>
+
+  <!-- 4. 第二章 -->
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <section style="display:flex;align-items:center;gap:14px;">
+        <section style="text-align:center;flex-shrink:0;">
+          <p style="margin:0;font-size:24px;font-weight:800;color:#23251d;line-height:1;letter-spacing:-2px;"><span leaf="">02</span></p>
+          <p style="margin:0;font-size:8px;font-weight:700;color:#9ea096;letter-spacing:2px;"><span leaf="">PART</span></p>
+        </section>
+        <span style="width:1px;height:36px;background:#bfc1b7;flex-shrink:0;display:inline-block;overflow:hidden;vertical-align:middle;font-size:0;line-height:0;"><span leaf="">&nbsp;</span></span>
+        <section>
+          <p style="margin:0 0 1px;font-size:17px;font-weight:800;color:#23251d;letter-spacing:0.2px;"><span leaf="">这一轮我们真正做完的事</span></p>
+          <p style="margin:0;font-size:11px;font-weight:600;color:#65675e;letter-spacing:1.2px;"><span leaf="">WHAT WE ACTUALLY SHIPPED</span></p>
+        </section>
+      </section>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <span leaf="">这轮迭代（v0.12.0）大致可以分成四块。我按「做了什么、为什么做」的顺序说。每一块都有它自己的「为什么」，跳过任何一个都讲不清楚后面。</span>
+      </p>
+    </section>
+  </section>
+
+  <!-- 强调标题 8 -->
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0 0 10px;font-size:15px;font-weight:800;color:#23251d;letter-spacing:0.2px;background:#eeefe9;display:inline-block;padding:4px 10px;border-radius:4px;box-shadow:inset 0 -2px 0 #ed7b2f;"><span leaf="">1. 边录边落盘——录音不再只在内存里</span></p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <span leaf="">v0.11.x 时代，录音是全在内存里的 ArrayBuffer。录 30 分钟还好，录两小时就容易崩。浏览器的内存上限、垃圾回收抖动、意外刷新，任何一样都能让一段辛苦录好的音频彻底消失。</span>
+      </p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <span leaf="">v0.12.0 把它换成了 </span><strong style="color:#23251d;"><span leaf="">OPFS（Origin Private File System）边录边落盘</span></strong><span leaf="">：</span>
+      </p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <ul style="margin:0;padding-left:22px;line-height:1.8;list-style-position:outside;">
+        <li style="margin-bottom:8px;font-size:15px;color:#4d4f46;list-style-type:disc;">
+          <section><span leaf="">每 0.6 秒切一段 PCM，异步写进浏览器私有文件系统；</span></section>
+        </li>
+        <li style="margin-bottom:8px;font-size:15px;color:#4d4f46;list-style-type:disc;">
+          <section><span leaf="">落盘和识别解耦——落盘慢不影响字幕，字幕卡不影响落盘；</span></section>
+        </li>
+        <li style="margin-bottom:8px;font-size:15px;color:#4d4f46;list-style-type:disc;">
+          <section><span leaf="">出 WAV / SRT / Markdown 时流式导出，不再一次性加载整个文件。</span></section>
+        </li>
+      </ul>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <span leaf="">这里踩到一个坑：</span><span style="border-bottom:2px solid #ed7b2f;font-weight:600;color:#23251d;"><span leaf="">FileSystemFileHandle.move() 只有 Chrome 有</span></span><span leaf="">。Firefox 和 Safari 要走 createWritable() + file.stream().pipeTo() 做流式拷贝改名。如果只在 Chrome 上测试，上线一周后就会收到一堆 Firefox 用户的报错。</span>
+      </p>
+    </section>
+  </section>
+
+  <!-- 强调标题 8 -->
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0 0 10px;font-size:15px;font-weight:800;color:#23251d;letter-spacing:0.2px;background:#eeefe9;display:inline-block;padding:4px 10px;border-radius:4px;box-shadow:inset 0 -2px 0 #ed7b2f;"><span leaf="">2. 回放 + 字幕 seek——录完还能回头看</span></p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <span leaf="">落盘之后，回放就是自然而然的下一步：</span>
+      </p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <ul style="margin:0;padding-left:22px;line-height:1.8;list-style-position:outside;">
+        <li style="margin-bottom:8px;font-size:15px;color:#4d4f46;list-style-type:disc;">
+          <section><span leaf="">点时间戳跳到对应音频位置；</span></section>
+        </li>
+        <li style="margin-bottom:8px;font-size:15px;color:#4d4f46;list-style-type:disc;">
+          <section><span leaf="">字幕和波形同步高亮；</span></section>
+        </li>
+        <li style="margin-bottom:8px;font-size:15px;color:#4d4f46;list-style-type:disc;">
+          <section><span leaf="">30 秒窗口解码，一次只读 0.96MB 的 Int16 PCM，不一次性 load 整段。</span></section>
+        </li>
+      </ul>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <span leaf="">性能优化上做了两件事：</span><span style="border-bottom:2px solid #ed7b2f;font-weight:600;color:#23251d;"><span leaf="">PcmLedger 字节记账</span></span><span leaf="">（overBudget / byteLength 用 O(1) 累加，替代原来 Wav.byteLength(chunks) 的 O(n) 遍历）；</span><span style="border-bottom:2px solid #ed7b2f;font-weight:600;color:#23251d;"><span leaf="">波形几何缓存</span></span><span leaf="">（measure() 是唯一读 getBoundingClientRect 的地方，其余走缓存，渲染 30fps 上限）。回放时波形不再一顿一顿。</span>
+      </p>
+    </section>
+  </section>
+
+  <!-- 强调标题 8 -->
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0 0 10px;font-size:15px;font-weight:800;color:#23251d;letter-spacing:0.2px;background:#eeefe9;display:inline-block;padding:4px 10px;border-radius:4px;box-shadow:inset 0 -2px 0 #ed7b2f;"><span leaf="">3. sherpa-onnx 流式后端——比快更快</span></p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <span leaf="">原本只有一个 ASR 后端：faster-whisper。它的 large-v3-turbo 确实准，但 rtf（实时率）2.48，也就是一段 10 秒的音频要等 24.8 秒才能出结果——这根本不叫「实时」。</span>
+      </p>
+    </section>
+  </section>
+
+  <!-- 精简对照表 -->
+  <section style="margin-top:24px;">
+    <section style="border-radius:6px;overflow:hidden;border:1px solid #bfc1b7;background:#fdfdf8;font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <section style="display:flex;background:#eeefe9;border-bottom:1px solid #bfc1b7;">
+        <section style="width:35%;padding:10px 12px;font-size:12px;font-weight:800;color:#23251d;"><span leaf="">后端</span></section>
+        <section style="width:32.5%;padding:10px 12px;font-size:12px;font-weight:800;color:#23251d;border-left:1px solid #bfc1b7;"><span leaf="">单句耗时 / rtf</span></section>
+        <section style="width:32.5%;padding:10px 12px;font-size:12px;font-weight:800;color:#23251d;border-left:1px solid #bfc1b7;"><span leaf="">中文效果</span></section>
+      </section>
+      <section style="display:flex;border-bottom:1px solid #bfc1b7;">
+        <section style="width:35%;padding:10px 12px;font-size:13px;color:#4d4f46;"><span leaf="">sherpa zipformer</span></section>
+        <section style="width:32.5%;padding:10px 12px;font-size:13px;color:#23251d;border-left:1px solid #bfc1b7;"><span leaf="">1.12s / 0.126</span></section>
+        <section style="width:32.5%;padding:10px 12px;font-size:13px;color:#23251d;border-left:1px solid #bfc1b7;"><span leaf="">逐字正确</span></section>
+      </section>
+      <section style="display:flex;border-bottom:1px solid #bfc1b7;">
+        <section style="width:35%;padding:10px 12px;font-size:13px;color:#4d4f46;"><span leaf="">whisper base</span></section>
+        <section style="width:32.5%;padding:10px 12px;font-size:13px;color:#23251d;border-left:1px solid #bfc1b7;"><span leaf="">0.97s / 0.109</span></section>
+        <section style="width:32.5%;padding:10px 12px;font-size:13px;color:#23251d;border-left:1px solid #bfc1b7;"><span leaf="">CER 51.7%</span></section>
+      </section>
+      <section style="display:flex;">
+        <section style="width:35%;padding:10px 12px;font-size:13px;color:#4d4f46;"><span leaf="">whisper large-v3-turbo</span></section>
+        <section style="width:32.5%;padding:10px 12px;font-size:13px;color:#23251d;border-left:1px solid #bfc1b7;"><span leaf="">~22s / 2.48</span></section>
+        <section style="width:32.5%;padding:10px 12px;font-size:13px;color:#23251d;border-left:1px solid #bfc1b7;"><span leaf="">准</span></section>
+      </section>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <span leaf="">sherpa 走的是 int8 量化，161MB，不需要完整语言模型，速度快一个数量级。可拼写的热词走 modified_beam_search，否则走 greedy。代价是模型不如 Whisper 通用，但对中文短句的场景足够。</span>
+      </p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <span leaf="">同时加了</span><span style="border-bottom:2px solid #ed7b2f;font-weight:600;color:#23251d;"><span leaf="">远程识别</span></span><span leaf="">（OpenAI 兼容 API），但</span><strong style="color:#23251d;"><span leaf="">默认关闭</span></strong><span leaf="">，并且带严格模式——音频要出本机，必须用户明确同意，不能默默打开。</span>
+      </p>
+    </section>
+  </section>
+
+  <!-- 强调标题 8 -->
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0 0 10px;font-size:15px;font-weight:800;color:#23251d;letter-spacing:0.2px;background:#eeefe9;display:inline-block;padding:4px 10px;border-radius:4px;box-shadow:inset 0 -2px 0 #ed7b2f;"><span leaf="">4. 三轮尾音修复——一句话的最后三个字</span></p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <span leaf="">这是这轮迭代里花时间最多、也最值得说的部分。先看现象：</span>
+      </p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="background:#fdfdf8;border:1px solid #bfc1b7;border-left:3px solid #ed7b2f;border-radius:6px;padding:14px 16px;font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.8;color:#4d4f46;font-style:italic;"><span leaf="">用户录完一句「今天天气很好适合出门」，字幕最后却成了「今天天气很好适合出」。</span><strong style="color:#23251d;font-style:normal;"><span leaf="">尾部 1–3 个字符消失了。</span></strong></p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <span leaf="">一开始所有人都以为是 ASR 的问题。我们去查 _clean（ASR 文本后处理）的四个子函数：</span>
+      </p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <ul style="margin:0;padding-left:22px;line-height:1.8;list-style-position:outside;">
+        <li style="margin-bottom:8px;font-size:15px;color:#4d4f46;list-style-type:disc;">
+          <section><span style="background:#eeefe9;color:#23251d;padding:2px 6px;border-radius:4px;font-family:ui-monospace,Menlo,Monaco,Consolas,monospace;font-size:13px;border:1px solid #b6b7af;"><span leaf="">_collapse_repetition</span></span><span leaf="">——用正则把 5 次及以上重复折叠成 1 次。丢 4/8/12 个字符，</span><strong style="color:#23251d;"><span leaf="">不可能只丢 1–3 个</span></strong><span leaf="">。</span></section>
+        </li>
+        <li style="margin-bottom:8px;font-size:15px;color:#4d4f46;list-style-type:disc;">
+          <section><span style="background:#eeefe9;color:#23251d;padding:2px 6px;border-radius:4px;font-family:ui-monospace,Menlo,Monaco,Consolas,monospace;font-size:13px;border:1px solid #b6b7af;"><span leaf="">_strip_echo</span></span><span leaf="">——ECHO_MIN_CHARS = 6，只删 6 个字符以上的回声串。</span><strong style="color:#23251d;"><span leaf="">不可能丢 1–3 个</span></strong><span leaf="">。</span></section>
+        </li>
+        <li style="margin-bottom:8px;font-size:15px;color:#4d4f46;list-style-type:disc;">
+          <section><span style="background:#eeefe9;color:#23251d;padding:2px 6px;border-radius:4px;font-family:ui-monospace,Menlo,Monaco,Consolas,monospace;font-size:13px;border:1px solid #b6b7af;"><span leaf="">_is_hallucination</span></span><span leaf="">——len(core) &gt; 12 直接返回 False，只处理 ≤12 字的整行丢弃。</span><strong style="color:#23251d;"><span leaf="">不裁尾</span></strong><span leaf="">。</span></section>
+        </li>
+        <li style="margin-bottom:8px;font-size:15px;color:#4d4f46;list-style-type:disc;">
+          <section><strong style="color:#23251d;"><span leaf="">UtteranceStream.apply 的 _SHRINK_GUARD = 0.55</span></strong><span leaf="">——</span><strong style="color:#23251d;"><span leaf="">这才是真凶。</span></strong></section>
+        </li>
+      </ul>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <span leaf="">_SHRINK_GUARD 的逻辑是：当新假设的文本长度小于旧文本的 55% 时，判定为「灾难性缩水」，拒绝更新。但它只拦「丢一半」——15 个字变 13 个（丢 2 个）、15 个变 14 个（丢 1 个），都在 55% 以上，于是被静默接受。</span><strong style="color:#23251d;"><span leaf="">尾巴就这么丢了。</span></strong>
+      </p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <span leaf="">修复方案是加一条更细的判据：</span>
+      </p>
+    </section>
+  </section>
+
+  <!-- 深色代码块 -->
+  <section style="margin:0 0 20px;border-radius:8px;overflow:hidden;background:#1E293B;box-shadow:0 4px 16px -8px rgba(15,23,42,0.4);">
+    <section style="display:flex;align-items:center;padding:9px 14px;background:#0F172A;">
+      <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#FF5F56;margin-right:7px;font-size:0;line-height:0;overflow:hidden;">.</span>
+      <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#FFBD2E;margin-right:7px;font-size:0;line-height:0;overflow:hidden;">.</span>
+      <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#27C93F;font-size:0;line-height:0;overflow:hidden;">.</span>
+      <span style="margin-left:12px;font-size:12px;color:#64748B;font-family:Consolas,Monaco,monospace;letter-spacing:1px;"><span leaf="">python</span></span>
+    </section>
+    <section style="padding:11px 14px;">
+      <p style="margin:0;font-family:'SF Mono',Consolas,Monaco,monospace;font-size:13px;line-height:1.6;color:#E2E8F0;"><span leaf="">if grew &gt; 0 and self._text.startswith(cleaned) and len(cleaned) &lt; len(self._text):</span></p>
+      <p style="margin:0;font-family:'SF Mono',Consolas,Monaco,monospace;font-size:13px;line-height:1.6;color:#E2E8F0;"><span leaf="">　　self._rejected += 1</span></p>
+      <p style="margin:0;font-family:'SF Mono',Consolas,Monaco,monospace;font-size:13px;line-height:1.6;color:#E2E8F0;"><span leaf="">　　return False</span></p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <strong style="color:#23251d;"><span leaf="">当新文本恰好是旧文本的前缀、且比旧文本更短时，旧文本严格更好——保留它，保留尾巴。</span></strong>
+      </p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <span leaf="">补了两个测试：一个是 cut=1/2/3 的尾部截断必须被拒，另一个是「今天天气很好适合出错」这种真正的尾部修正必须被接受。</span>
+      </p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <strong style="color:#23251d;"><span leaf="">但 bug 不只在这。</span></strong>
+      </p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <span leaf="">回头追更底层的地方，发现 </span><span style="border-bottom:2px solid #ed7b2f;font-weight:600;color:#23251d;"><span leaf="">VAD_TAIL_KEEP_MS</span></span><span leaf=""> 才是第一道防线——这一参数决定 VAD 在判定静音后多长的尾音保留给解码器。</span>
+      </p>
+    </section>
+  </section>
+
+  <!-- 时间线/案例 -->
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <section style="display:flex;">
+        <section style="display:flex;flex-direction:column;align-items:center;margin-right:16px;flex-shrink:0;">
+          <section style="width:14px;height:14px;border-radius:50%;border:3px solid #1e1f23;background:#fdfdf8;margin-top:4px;"><span leaf=""><br></span></section>
+          <section style="width:2px;background:#bfc1b7;flex:1;margin-top:4px;min-height:48px;"><span leaf=""><br></span></section>
+        </section>
+        <section style="flex:1;padding-bottom:12px;">
+          <section style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+            <span style="display:inline-block;background:#1e1f23;color:#fff;font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;"><span leaf="">CASE</span></span>
+            <h4 style="font-size:15px;font-weight:800;color:#23251d;margin:0;"><span leaf="">三轮尾音修复</span></h4>
+          </section>
+          <p style="font-size:11px;font-weight:600;color:#65675e;letter-spacing:1px;margin:0 0 12px;"><span leaf="">VAD_TAIL_KEEP_MS · covers_end · _SHRINK_GUARD</span></p>
+          <p style="font-size:14px;margin:0 0 14px;color:#4d4f46;line-height:1.7;text-align:justify;"><span leaf="">第一轮：150ms 尾音太短，ASR 拿不到完整音节，解码只能给到「出」。第二轮：改 400ms，但平均 RMS 判静音失效，把有声的尾音当成纯静音丢掉。第三轮：改 1000ms，用 np.any(np.abs(tail_audio) &gt; silence_floor) 而不是平均 RMS，并把 covers_end(end_s) 比到 duration_s（缓冲末尾），不只是 end_s。</span></p>
+          <p style="font-size:14px;margin:12px 0 0;color:#4d4f46;line-height:1.7;text-align:justify;"><strong style="color:#23251d;"><span leaf="">结果：end 时间戳和 audio 长度是两个独立语义，不能为「让两者一致」改 end，那会污染字幕时间轴。正确做法是让解码缓冲比 end 略长，去吃掉那点尾音。</span></strong></p>
+        </section>
+      </section>
+    </section>
+  </section>
+
+  <!-- 5. 第三章 -->
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <section style="display:flex;align-items:center;gap:14px;">
+        <section style="text-align:center;flex-shrink:0;">
+          <p style="margin:0;font-size:24px;font-weight:800;color:#23251d;line-height:1;letter-spacing:-2px;"><span leaf="">03</span></p>
+          <p style="margin:0;font-size:8px;font-weight:700;color:#9ea096;letter-spacing:2px;"><span leaf="">PART</span></p>
+        </section>
+        <span style="width:1px;height:36px;background:#bfc1b7;flex-shrink:0;display:inline-block;overflow:hidden;vertical-align:middle;font-size:0;line-height:0;"><span leaf="">&nbsp;</span></span>
+        <section>
+          <p style="margin:0 0 1px;font-size:17px;font-weight:800;color:#23251d;letter-spacing:0.2px;"><span leaf="">那些「想多了」和「想少了」</span></p>
+          <p style="margin:0;font-size:11px;font-weight:600;color:#65675e;letter-spacing:1.2px;"><span leaf="">OVERSHOT &amp; UNDERSHOT</span></p>
+        </section>
+      </section>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <span leaf="">写代码的过程里，有几件事挺有意思。</span>
+      </p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <strong style="color:#23251d;"><span leaf="">Windows SAPI 引擎 8.9 秒音频等 23.9 秒无输出。</span></strong><span leaf="">我们想给 Windows 用户一个零依赖的语音识别兜底方案。结果 SAPI 的 SpeechRecognizer 不支持文件流输入，只能走麦克风实时流。用 ffmpeg 把音频「喂」给它也不行。最后只好放弃 Windows 原生这条路，转而推 sherpa-onnx（跨平台、不依赖语言模型）。</span>
+      </p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <strong style="color:#23251d;"><span leaf="">GitHub releases 301 被阻断只能走 hf-mirror。</span></strong><span leaf="">用户在海外，下载 sherpa 模型走 GitHub Releases，301 重定向到对象存储被墙了。改走 hf-mirror（HuggingFace 镜像）才通。这提醒我们：</span><span style="border-bottom:2px solid #ed7b2f;font-weight:600;color:#23251d;"><span leaf="">只要涉及「用户要下载模型」，就必须考虑多源分发</span></span><span leaf="">。</span>
+      </p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <strong style="color:#23251d;"><span leaf="">models/hotwords.txt 才是生效路径。</span></strong><span leaf="">热词配置一开始放在 config.py，后来发现 sherpa 后端读的是 models/hotwords.txt——两边改一处，另一边默默没生效。后来专门做了一致性检查。</span>
+      </p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <strong style="color:#23251d;"><span leaf="">CER 计算陷阱。</span></strong><span leaf="">我们一度测出「medium CER 78%」，吓一跳。查了半天发现参考文本里带了文件头，计算 CER 时把文件头也算进去了。去掉文件头后是 0.0%。</span><span style="border-bottom:2px solid #ed7b2f;font-weight:600;color:#23251d;"><span leaf="">测试脚本的参考文本一定要干净</span></span><span leaf="">。</span>
+      </p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <strong style="color:#23251d;"><span leaf="">实现者的「顾虑」字段是计划缺陷的主要发现源。</span></strong><span leaf="">这轮我们用 SDD（规格驱动开发）流程写实现计划。每个实现者在 plan 里写「顾虑」——我担心 XX 可能有问题。后来发现，</span><span style="border-bottom:2px solid #ed7b2f;font-weight:600;color:#23251d;"><span leaf="">所有真正被踩到的坑，都在「顾虑」里提前写过</span></span><span leaf="">。这个字段比任何 review 都管用。</span>
+      </p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <strong style="color:#23251d;"><span leaf="">幻觉刷屏。</span></strong><span leaf="">有一段时间，前端会莫名其妙刷出一堆「嗯」、「啊」、「好的好的」，密集到几乎覆盖整屏。排查下来，tiny 模型在安静片段下会编词，_is_hallucination 的 len(core)&gt;12 又拦不住短行。我们后来加了 models/hotwords.txt 词表（用户自定义的高优先词），并在 sherpa 后端用 modified_beam_search 让热词真正生效。tiny 填词表后 CER 从 27.6% 降到 13.8%——不是银弹，但能用。</span>
+      </p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <strong style="color:#23251d;"><span leaf="">Windows SAPI 的「想多了」。</span></strong><span leaf="">我们一开始假设「Windows 系统自带语音识别总能用吧」，结果花了两天发现它是为「实时麦克风」设计的，文件流输入根本不支持。</span><span style="border-bottom:2px solid #ed7b2f;font-weight:600;color:#23251d;"><span leaf="">假设越接近「常识」，越要早点验证</span></span><span leaf="">。</span>
+      </p>
+    </section>
+  </section>
+
+  <!-- 6. 第四章 -->
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <section style="display:flex;align-items:center;gap:14px;">
+        <section style="text-align:center;flex-shrink:0;">
+          <p style="margin:0;font-size:24px;font-weight:800;color:#23251d;line-height:1;letter-spacing:-2px;"><span leaf="">04</span></p>
+          <p style="margin:0;font-size:8px;font-weight:700;color:#9ea096;letter-spacing:2px;"><span leaf="">PART</span></p>
+        </section>
+        <span style="width:1px;height:36px;background:#bfc1b7;flex-shrink:0;display:inline-block;overflow:hidden;vertical-align:middle;font-size:0;line-height:0;"><span leaf="">&nbsp;</span></span>
+        <section>
+          <p style="margin:0 0 1px;font-size:17px;font-weight:800;color:#23251d;letter-spacing:0.2px;"><span leaf="">数据：延迟到底是不是达标</span></p>
+          <p style="margin:0;font-size:11px;font-weight:600;color:#65675e;letter-spacing:1.2px;"><span leaf="">LATENCY NUMBERS</span></p>
+        </section>
+      </section>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <span leaf="">我们坚持</span><span style="border-bottom:2px solid #ed7b2f;font-weight:600;color:#23251d;"><span leaf="">延迟要以语音起点为原点</span></span><span leaf="">。如果以「说完」为原点算延迟，必然是负数（因为你已经说完了），截断到 0 毫秒。这种口径毫无意义。</span>
+      </p>
+    </section>
+  </section>
+
+  <!-- 对照表 -->
+  <section style="margin-top:24px;">
+    <section style="border-radius:6px;overflow:hidden;border:1px solid #bfc1b7;background:#fdfdf8;font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <section style="display:flex;background:#eeefe9;border-bottom:1px solid #bfc1b7;">
+        <section style="width:35%;padding:10px 12px;font-size:12px;font-weight:800;color:#23251d;"><span leaf="">指标</span></section>
+        <section style="width:32.5%;padding:10px 12px;font-size:12px;font-weight:800;color:#23251d;border-left:1px solid #bfc1b7;"><span leaf="">数值</span></section>
+        <section style="width:32.5%;padding:10px 12px;font-size:12px;font-weight:800;color:#23251d;border-left:1px solid #bfc1b7;"><span leaf="">说明</span></section>
+      </section>
+      <section style="display:flex;border-bottom:1px solid #bfc1b7;">
+        <section style="width:35%;padding:10px 12px;font-size:13px;color:#4d4f46;"><span leaf="">首条字幕</span></section>
+        <section style="width:32.5%;padding:10px 12px;font-size:13px;color:#23251d;border-left:1px solid #bfc1b7;"><span leaf="">2.8–3.4s</span></section>
+        <section style="width:32.5%;padding:10px 12px;font-size:13px;color:#23251d;border-left:1px solid #bfc1b7;"><span leaf="">从语音起点到首条字幕上屏</span></section>
+      </section>
+      <section style="display:flex;border-bottom:1px solid #bfc1b7;">
+        <section style="width:35%;padding:10px 12px;font-size:13px;color:#4d4f46;"><span leaf="">定稿</span></section>
+        <section style="width:32.5%;padding:10px 12px;font-size:13px;color:#23251d;border-left:1px solid #bfc1b7;"><span leaf="">1.0s</span></section>
+        <section style="width:32.5%;padding:10px 12px;font-size:13px;color:#23251d;border-left:1px solid #bfc1b7;"><span leaf="">后续段落更新延迟</span></section>
+      </section>
+      <section style="display:flex;border-bottom:1px solid #bfc1b7;">
+        <section style="width:35%;padding:10px 12px;font-size:13px;color:#4d4f46;"><span leaf="">精修</span></section>
+        <section style="width:32.5%;padding:10px 12px;font-size:13px;color:#23251d;border-left:1px solid #bfc1b7;"><span leaf="">~12s</span></section>
+        <section style="width:32.5%;padding:10px 12px;font-size:13px;color:#23251d;border-left:1px solid #bfc1b7;"><span leaf="">全段精修完成</span></section>
+      </section>
+      <section style="display:flex;">
+        <section style="width:35%;padding:10px 12px;font-size:13px;color:#4d4f46;"><span leaf="">默认模型 CER</span></section>
+        <section style="width:32.5%;padding:10px 12px;font-size:13px;color:#23251d;border-left:1px solid #bfc1b7;"><span leaf="">0.0%</span></section>
+        <section style="width:32.5%;padding:10px 12px;font-size:13px;color:#23251d;border-left:1px solid #bfc1b7;"><span leaf="">medium，理想情况</span></section>
+      </section>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <span leaf="">这里有个反直觉的点：</span><span style="border-bottom:2px solid #ed7b2f;font-weight:600;color:#23251d;"><span leaf="">精度和延迟往往成反比</span></span><span leaf="">。要快（sherpa rtf 0.126）就要牺牲通用性；要准（whisper large-v3-turbo rtf 2.48）就要牺牲延迟。</span><strong style="color:#23251d;"><span leaf="">没有「全都要」的银弹，只有按场景取舍。</span></strong>
+      </p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <span leaf="">我们的做法是</span><strong style="color:#23251d;"><span leaf="">默认 sherpa、可切 whisper</span></strong><span leaf="">：日常中文短句，sherpa 又快又准，够用；要处理长段专业内容或者英语，切到 whisper large-v3-turbo，多等十几秒。</span><strong style="color:#23251d;"><span leaf="">给用户选择权，而不是替用户做决定。</span></strong>
+      </p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <span leaf="">延迟口径这件事，我们内部也吵过。一开始有人建议「用说完后到结果出来的延迟」，因为这个数字「看起来更短」。但用户感知的延迟是「我说完话，多久看到字幕」——原点必须是语音起点。</span><span style="border-bottom:2px solid #ed7b2f;font-weight:600;color:#23251d;"><span leaf="">好看的数据不等于对的数据</span></span><span leaf="">，这是产品和工程之间永恒的拉扯。</span>
+      </p>
+    </section>
+  </section>
+
+  <!-- 7. 第五章 -->
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <section style="display:flex;align-items:center;gap:14px;">
+        <section style="text-align:center;flex-shrink:0;">
+          <p style="margin:0;font-size:24px;font-weight:800;color:#23251d;line-height:1;letter-spacing:-2px;"><span leaf="">05</span></p>
+          <p style="margin:0;font-size:8px;font-weight:700;color:#9ea096;letter-spacing:2px;"><span leaf="">PART</span></p>
+        </section>
+        <span style="width:1px;height:36px;background:#bfc1b7;flex-shrink:0;display:inline-block;overflow:hidden;vertical-align:middle;font-size:0;line-height:0;"><span leaf="">&nbsp;</span></span>
+        <section>
+          <p style="margin:0 0 1px;font-size:17px;font-weight:800;color:#23251d;letter-spacing:0.2px;"><span leaf="">我们学到的几件事</span></p>
+          <p style="margin:0;font-size:11px;font-weight:600;color:#65675e;letter-spacing:1.2px;"><span leaf="">WHAT WE LEARNED</span></p>
+        </section>
+      </section>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <strong style="color:#23251d;"><span leaf="">第一，不要相信「常识」。</span></strong><span leaf="">Windows SAPI 自带语音识别、OPFS 一定有 move()、GitHub releases 一定能下载、参考文本一定是干净的——这四个「常识」每一个都让我们踩过坑。</span><span style="border-bottom:2px solid #ed7b2f;font-weight:600;color:#23251d;"><span leaf="">越觉得「这肯定没问题」的地方，越要早点去验证</span></span><span leaf="">。</span>
+      </p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <strong style="color:#23251d;"><span leaf="">第二，bug 的根因经常不在你第一眼怀疑的地方。</span></strong><span leaf="">尾字丢失，第一反应是 ASR 后处理（_clean），但真正的三个原因分别在 VAD 尾音保留（150ms）、流式文本收缩守卫（55% 阈值）、和「语义边界」（covers_end 比错对象）。</span><span style="border-bottom:2px solid #ed7b2f;font-weight:600;color:#23251d;"><span leaf="">真正定位一个 bug，往往要把整条链路走一遍</span></span><span leaf="">。</span>
+      </p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <strong style="color:#23251d;"><span leaf="">第三，测试不是形式，是「钉子」。</span></strong><span leaf="">每一个修过的 bug，都对应一个测试。cut=0..5 的 6 个尾部截断用例，本质上是把「我修好了」这句话变成机器可验证的事实。</span><span style="border-bottom:2px solid #ed7b2f;font-weight:600;color:#23251d;"><span leaf="">没有测试的修复，只是「我猜我修好了」</span></span><span leaf="">。</span>
+      </p>
+    </section>
+  </section>
+
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <strong style="color:#23251d;"><span leaf="">第四，给用户选择权。</span></strong><span leaf="">sherpa 快、whisper 准、远程强——但没有一个是「最好」。我们的做法是：默认值选一个最稳的（sherpa），其他作为可选项暴露出来。</span><span style="border-bottom:2px solid #ed7b2f;font-weight:600;color:#23251d;"><span leaf="">工具的价值不在于替用户决定，而在于把决定权交回去</span></span><span leaf="">。</span>
+      </p>
+    </section>
+  </section>
+
+  <!-- 8. 结尾内容块 -->
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <section style="display:flex;align-items:center;gap:14px;margin-bottom:16px;">
+        <section style="text-align:center;flex-shrink:0;">
+          <p style="margin:0;font-size:24px;font-weight:800;color:#23251d;line-height:1;letter-spacing:-2px;"><span leaf="">///</span></p>
+          <p style="margin:0;font-size:8px;font-weight:700;color:#9ea096;letter-spacing:2px;"><span leaf="">END</span></p>
+        </section>
+        <span style="width:1px;height:36px;background:#bfc1b7;flex-shrink:0;display:inline-block;overflow:hidden;vertical-align:middle;font-size:0;line-height:0;"><span leaf="">&nbsp;</span></span>
+        <section>
+          <p style="margin:0 0 1px;font-size:17px;font-weight:800;color:#23251d;letter-spacing:0.2px;"><span leaf="">一句话总结</span></p>
+          <p style="margin:0;font-size:11px;font-weight:600;color:#65675e;letter-spacing:1.2px;"><span leaf="">WHAT WE LEARNED</span></p>
+        </section>
+      </section>
+      <p style="margin:0 0 14px;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;"><span leaf="">EchoNote 是一个「为了省 100 毫秒而认真」的项目。我们没有做模型创新、没有做算法突破，我们做的事情是：把每一个「看起来是一行代码」的地方，真正理解清楚它的语义、边界、和浏览器差异，然后用测试把它们钉死。</span></p>
+      <p style="margin:0 0 14px;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;"><span leaf="">尾部丢 3 个字，根因在 VAD 的 150 毫秒尾音保留、在 _SHRINK_GUARD 的 55% 阈值、在 covers_end 比到 end_s 而不是 duration_s——三个各自正确、合起来就错的地方。这不是玄学，这是工程。</span></p>
+      <section style="background:#eeefe9;border-radius:6px;padding:16px 18px;border:1px solid #bfc1b7;text-align:center;">
+        <p style="font-size:15px;color:#23251d;margin:0;line-height:1.6;"><strong style="border-bottom:3px solid #ed7b2f;"><span leaf="">每一个「看起来一行代码」的地方，都值得被认真理解。</span></strong></p>
+      </section>
+    </section>
+  </section>
+
+  <!-- 8. Roadmap 胶囊 -->
+  <section style="margin-top:24px;">
+    <section style="padding:18px;border-radius:6px;background:#fdfdf8;border:1px solid #bfc1b7;font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0 0 12px;font-size:11px;font-weight:800;letter-spacing:2px;color:#65675e;"><span leaf="">ROADMAP</span></p>
+      <section style="display:flex;flex-wrap:wrap;gap:8px;">
+        <span style="display:inline-block;padding:6px 10px;border-radius:999px;background:#e5e7e0;border:1px solid #bfc1b7;font-size:12px;font-weight:700;color:#23251d;"><span leaf="">延迟达标（A 档 p95）</span></span>
+        <span style="display:inline-block;padding:6px 10px;border-radius:999px;background:#e5e7e0;border:1px solid #bfc1b7;font-size:12px;font-weight:700;color:#23251d;"><span leaf="">系统声音 / 双轨录制</span></span>
+        <span style="display:inline-block;padding:6px 10px;border-radius:999px;background:#e5e7e0;border:1px solid #bfc1b7;font-size:12px;font-weight:700;color:#23251d;"><span leaf="">说话人分离</span></span>
+        <span style="display:inline-block;padding:6px 10px;border-radius:999px;background:#e5e7e0;border:1px solid #bfc1b7;font-size:12px;font-weight:700;color:#23251d;"><span leaf="">本地历史记录与搜索</span></span>
+        <span style="display:inline-block;padding:6px 10px;border-radius:999px;background:#e5e7e0;border:1px solid #bfc1b7;font-size:12px;font-weight:700;color:#23251d;"><span leaf="">模型热切换</span></span>
+        <span style="display:inline-block;padding:6px 10px;border-radius:999px;background:#e5e7e0;border:1px solid #bfc1b7;font-size:12px;font-weight:700;color:#23251d;"><span leaf="">桌面端打包（Tauri）</span></span>
+        <span style="display:inline-block;padding:6px 10px;border-radius:999px;background:#1e1f23;border:1px solid #23251d;font-size:12px;font-weight:700;color:#ffffff;"><span leaf="">英文界面</span></span>
+      </section>
+    </section>
+  </section>
+
+  <!-- 9. 固定签名段落 -->
+  <section style="margin-top:24px;">
+    <section style="font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="margin:0;font-size:14px;line-height:1.9;text-align:justify;color:#4d4f46;">
+        <span leaf="">我是 {{作者名}}，{{一句话简介}}。EchoNote 是我在做的开源项目，目标是让本地语音转文字工具真正好用。</span>
+      </p>
+    </section>
+  </section>
+
+  <!-- 10. 结尾行动区 -->
+  <section style="margin-top:24px;">
+    <section style="background:#fdfdf8;border:1px solid #bfc1b7;border-radius:6px;padding:22px 16px;text-align:center;font-family:'IBM Plex Sans',-apple-system,sans-serif;">
+      <p style="font-size:13px;font-weight:700;color:#23251d;line-height:1.6;margin:0 0 14px;"><span leaf="">如果你觉得今天这篇有收获，欢迎<strong style="border-bottom:2px solid #ed7b2f;">点赞、在看、转发</strong>三连，我们下篇见</span></p>
+      <section style="display:flex;justify-content:center;gap:18px;margin-bottom:14px;flex-wrap:wrap;">
+        <section style="text-align:center;color:#4d4f46;">
+          <section style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;margin:0 auto 6px;background:#eeefe9;border-radius:6px;border:1px solid #bfc1b7;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg>
+          </section>
+          <span style="font-size:11px;font-weight:600;"><span leaf="">赞</span></span>
+        </section>
+        <section style="text-align:center;color:#4d4f46;">
+          <section style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;margin:0 auto 6px;background:#eeefe9;border-radius:6px;border:1px solid #bfc1b7;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path></svg>
+          </section>
+          <span style="font-size:11px;font-weight:600;"><span leaf="">在看</span></span>
+        </section>
+        <section style="text-align:center;color:#23251d;">
+          <section style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;margin:0 auto 6px;background:#d4c9b8;border-radius:6px;border:1px solid #b17816;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#23251d" stroke-width="1.8" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+          </section>
+          <span style="font-size:11px;font-weight:700;"><span leaf="">收藏</span></span>
+        </section>
+      </section>
+      <p style="line-height:1.6;font-size:10px;color:#9ea096;letter-spacing:2px;margin:0;font-weight:500;"><span leaf="">THANKS FOR READING</span></p>
+    </section>
+  </section>
+
+  <!-- 隐藏标记 -->
+  <mp-style-type data-value="3"></mp-style-type>
+</section>
+  </div>
+</div>
+<script>
+  function gzhShowToast(msg){
+    var t=document.getElementById('gzhToast');
+    t.textContent=msg;t.classList.add('show');
+    clearTimeout(t._timer);
+    t._timer=setTimeout(function(){t.classList.remove('show');},2800);
+  }
+  function gzhCopy(){
+    var el=document.getElementById('gzh-content');
+    // 选中渲染后的富文本节点并复制（等价于手动 Ctrl+A / Ctrl+C，保留全部样式）
+    var range=document.createRange();
+    range.selectNodeContents(el);
+    var sel=window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    var ok=false;
+    try{ok=document.execCommand('copy');}catch(e){ok=false;}
+    sel.removeAllRanges();
+    var btn=document.getElementById('gzhCopyBtn');
+    if(ok){
+      gzhShowToast('✅ 已复制！去公众号编辑器按 Ctrl/⌘+V 粘贴即可');
+      var old=btn.textContent;btn.textContent='✅ 已复制';
+      setTimeout(function(){btn.textContent=old;},2200);
+    }else{
+      gzhShowToast('⚠ 自动复制失败，请手动全选(Ctrl/⌘+A)再复制(Ctrl/⌘+C)');
+    }
+  }
+</script>
+</body>
+</html>

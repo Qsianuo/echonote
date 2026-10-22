@@ -5,10 +5,12 @@ set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
 fail=0
+checks=0
 
 expect_empty() {
   local name="$1" pattern="$2"
   shift 2
+  checks=$((checks + 1))
   local out
   out="$(grep -rn "$pattern" "$@" 2>/dev/null || true)"
   if [ -z "$out" ]; then
@@ -23,6 +25,7 @@ expect_empty() {
 expect_hit() {
   local name="$1" pattern="$2"
   shift 2
+  checks=$((checks + 1))
   if grep -rq "$pattern" "$@" 2>/dev/null; then
     printf 'PASS  %s\n' "$name"
   else
@@ -53,10 +56,24 @@ expect_empty "17 audioChunks fully removed"      "audioChunks"            web/
 expect_hit   "18 preroll documented"             "ECHONOTE_VAD_PREROLL_MS" README.md
 expect_hit   "19 timing message documented"      '"type":"timing"'        README.md
 expect_empty "20 no false 'audio not written to disk' claim" "\(录音\|音频\|语音\).\{0,10\}不写入磁盘" README.md web/
+# #20 的距离窗口是 10 字，拦不住"录音与识别均在本机完成，不上传云端，也不写入磁盘"
+# 这种拉开 21 字的原句。放宽距离会误伤"转写文本不写入磁盘"之类正确表述，
+# 所以单独钉住这句原话。
+expect_empty "20b no 'not uploaded, not written to disk' sentence" "不上传云端，也不写入磁盘" README.md web/
+
+checks=$((checks + 1))
+fe_proto=$(sed -n "s/.*PROTOCOL_VERSION = '\([0-9]*\)'.*/\1/p" web/app.js | head -1)
+sv_proto=$(sed -n 's/.*PROTOCOL_VERSION = "\([0-9]*\)".*/\1/p' app/protocol.py | head -1)
+if [ -n "$fe_proto" ] && [ "$fe_proto" = "$sv_proto" ]; then
+  printf 'PASS  %s\n' "21 protocol constant in sync ($fe_proto)"
+else
+  printf 'FAIL  %s\n' "21 protocol constant mismatch: web=$fe_proto server=$sv_proto"
+  fail=1
+fi
 
 if [ "$fail" -eq 0 ]; then
   echo "----"
-  echo "GATE-0: PASS (all checks)"
+  echo "GATE-0: PASS ($checks checks)"
 else
   echo "----"
   echo "GATE-0: FAIL"

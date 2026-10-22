@@ -196,10 +196,41 @@
     },
   };
 
+  /**
+   * 能否在录音结束时把 .pcm.tmp 变成 .pcm。`move()` 只有 Chrome 系有（Firefox /
+   * Safari 支持 OPFS 却没有它），缺了就得靠 `createWritable()` 流式复制；两者
+   * 都没有时这篇录音的文件永远改不了名，不值得落盘。
+   */
+  function supportsRenameOrStreamCopy() {
+    if (typeof FileSystemFileHandle === 'undefined') return false;
+    const proto = FileSystemFileHandle.prototype;
+    return typeof proto.move === 'function' || typeof proto.createWritable === 'function';
+  }
+
+  /**
+   * 把 fromName 改名成 toName。有 `move()` 直接改；没有（Firefox / Safari）就
+   * 新建目标文件、`file.stream()` 流式拷贝、再删旧文件。绝不 arrayBuffer()：
+   * 长录音有几百 MB，一次读进来就等于放弃了"内存占用与时长无关"。
+   */
+  async function renameEntry(root, handle, fromName, toName) {
+    if (typeof handle.move === 'function') {
+      await handle.move(toName);
+      return;
+    }
+    const target = await root.getFileHandle(toName, { create: true });
+    const writable = await target.createWritable();
+    await (await handle.getFile()).stream().pipeTo(writable);
+    await root.removeEntry(fromName);
+  }
+
   async function openOpfsStore(sessionKey, onError) {
     if (!navigator.storage || typeof navigator.storage.getDirectory !== 'function') {
       throw new Error('缺少 OPFS 支持');
     }
+    // 收尾必须能把 .pcm.tmp 转成正式文件：Chrome 用 move()，Firefox / Safari
+    // 没有 move() 但有 createWritable()（流式复制代替改名）。两者都缺的浏览器
+    // 一旦开录就会留下永远改不了名的 .tmp，录完读不回来——直接降级内存。
+    if (!supportsRenameOrStreamCopy()) throw new Error('OPFS 缺少改名与流式写入能力');
     const root = await navigator.storage.getDirectory(); // 隐私模式下可能直接抛错
     const tmpName = `${sessionKey}.pcm.tmp`;
     const finalName = `${sessionKey}.pcm`;
@@ -240,7 +271,10 @@
     worker.addEventListener('message', (event) => {
       const message = event.data || {};
       if (message.type === 'progress') {
-        bytes = message.offset; // Worker 报的已落盘字节，比本地累加更可信
+        // Worker 报的是"已落盘"字节，只增不减：progress 比本地累加晚一点到，
+        // 直接赋值会让 bytes 回退（最多一个 PROGRESS_STEP 窗口）且再也追不回来，
+        // WAV 头按 ledger 写、数据按 bytes 读，就会得到"头长数据短"的坏文件。
+        bytes = Math.max(bytes, message.offset);
         return;
       }
       if (message.type === 'flushed') {
@@ -285,22 +319,24 @@
     async function doFinish() {
       if (closed) return;
       closed = true;
+      let finished;
       try {
-        await request({ type: 'finish' });
+        finished = await request({ type: 'finish' });
       } catch (error) {
         // flush/close 没走完就不能改名：半截文件一旦叫 .pcm，导出会得到坏 WAV，
         // 下次启动也不会提示未完成。保留 .pcm.tmp，并标记本段不可导出。
         failStorage(error.message);
         return;
       }
+      // 落盘长度以 Worker 的最终 offset 为准：本地累加只用于进度，若最后一帧
+      // 没写全，bytes 会比真实文件长，导出时数据就短于 WAV 头。
+      if (finished && typeof finished.offset === 'number') bytes = finished.offset;
       worker.terminate();
       try {
         fileHandle = await root.getFileHandle(currentName);
-        if (typeof fileHandle.move === 'function') {
-          await fileHandle.move(finalName);
-          currentName = finalName;
-          fileHandle = await root.getFileHandle(finalName);
-        }
+        await renameEntry(root, fileHandle, currentName, finalName);
+        currentName = finalName;
+        fileHandle = await root.getFileHandle(finalName);
       } catch (error) {
         // 改名失败不影响内容：继续用 .pcm.tmp 句柄读，下次启动会提示未完成。
         console.warn('[echonote] 录音文件改名失败，保留 .tmp：', error);
@@ -397,6 +433,10 @@
   /**
    * 启动时只报告、不处理上次残留的 .pcm.tmp：不删除、不改名、不计入字节数，
    * 因为半截文件既不是可播放的录音，也可能是用户唯一的一份素材。
+   *
+   * 判据是「有 .pcm.tmp 且没有同名 .pcm」，而不是只看 .tmp 后缀：Firefox /
+   * Safari 没有 move()，正常结束的录音在改名失败时也会留在 .tmp，只按后缀报警
+   * 会把一段完整录音误报成「上次未完成」。
    */
   async function reportUnfinishedRecordings() {
     try {
@@ -405,6 +445,9 @@
       let bytes = 0;
       for await (const entry of root.values()) {
         if (entry.kind !== 'file' || !entry.name.endsWith('.pcm.tmp')) continue;
+        const finalName = `${entry.name.slice(0, -'.pcm.tmp'.length)}.pcm`;
+        const finished = await root.getFileHandle(finalName).catch(() => null);
+        if (finished) continue; // 已经是完整录音，只是名字还没换过来
         bytes += (await entry.getFile()).size;
       }
       if (bytes <= 0) return;
@@ -741,7 +784,7 @@
 
       state.maxRecordMinutes = Number(config.max_record_minutes) || 0;
       if (state.maxRecordMinutes === 0) {
-        showNotice('已关闭录音时长上限（时长不限，内存风险自负）。');
+        showNotice('已关闭录音时长上限（时长不限；音频边录边落盘，内存只与回放窗口和降级模式有关）。');
       }
 
       // The first config message must already carry the server default

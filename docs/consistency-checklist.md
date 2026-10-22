@@ -37,8 +37,10 @@ grep -rn "3\.9+" README.md start.bat run.sh app/     # 必须为空
 | 16 | 模型切换已文档化 | `grep -n "识别模型" README.md` | 命中 | ✅ 实测命中 4 处（功能列表、界面说明、FAQ 速度/准确率段） |
 | 17 | 旧堆内音频数组已彻底移除 | `grep -rn "audioChunks" web/` | 空 | ✅ 空（v0.12 改 `AudioStore`：OPFS 落盘 / 内存降级，`app.js` 只剩一个字节计数器） |
 | 18 | VAD 预滚已文档化 | `grep -n "ECHONOTE_VAD_PREROLL_MS" README.md` | 命中 | ✅ 实测命中 1 处（配置表，默认 `300`，写明按 30 ms 取整为 10 帧、时间轴最多前移 300 ms） |
-| 19 | `timing` 消息已文档化 | `grep -n '"type":"timing"' README.md` | 命中 | ✅ 实测命中 1 处（协议段示例 `{"type":"timing","epoch":1,"turn_id":"1-1","speech_finished_at":12345.68,"segments":{"to_first_text_ms":2140.5}}`，另有文字说明 v4 新增该消息） |
+| 19 | `timing` 消息已文档化 | `grep -n '"type":"timing"' README.md` | 命中 | ✅ 实测命中 1 处（协议段示例 `{"type":"timing","epoch":1,"turn_id":"1-1","speech_finished_at":12345.678,"segments":{"to_first_text_ms":2140.5}}`——`speech_finished_at` 保留三位小数、`segments` 保留一位小数，与 `app/timing.py` 的 `round(..., 3)` / `round(..., 1)` 一致；另有文字说明 v4 新增该消息） |
 | 20 | 音频不宣称「不写入磁盘」 | `grep -rn "\(录音\|音频\|语音\).\{0,10\}不写入磁盘" README.md web/` | 空 | ✅ 空。模式已收窄：只拦音频/录音/语音附近的失实声明，不再误伤「转写**文本**不写入磁盘」这类正确表述（判别力实测：旧句 `录音与转写不写入磁盘…` 命中，正句 `转写文本不写入磁盘，录音分片落在 OPFS` 不命中） |
+| 20b | 原句「不上传云端，也不写入磁盘」已不再出现 | `grep -rn "不上传云端，也不写入磁盘" README.md web/` | 空 | ✅ 空（该句两个分句相隔 21 字，超出 #20 的 10 字窗口，所以单钉一条；**不放宽距离**，以免误伤「转写文本不写入磁盘」） |
+| 21 | 前端协议常量与服务端一致 | `sed` 提取 `web/app.js` 与 `app/protocol.py` 的 `PROTOCOL_VERSION` 后比较 | 相等 | ✅ `PASS 21 protocol constant in sync (4)`（前端 `'4'`、服务端 `"4"`） |
 
 ## 2. 代码侧一致性（与文案对齐的实现点）
 

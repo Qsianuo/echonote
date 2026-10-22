@@ -62,16 +62,16 @@ async function open(message) {
   const name = message.name;
   const root = await navigator.storage.getDirectory();
   const tmpName = `${name}.pcm.tmp`;
+  const finalName = `${name}.pcm`;
   let fileHandle = await root.getFileHandle(tmpName, { create: true });
   let size = (await fileHandle.getFile()).size;
 
   if (size === 0) {
-    // 连接中断后继续录音：上一段已经改名成 .pcm，接回来接着往后写。
-    const doneHandle = await root.getFileHandle(`${name}.pcm`).catch(() => null);
+    // 连接中断后继续录音：上一段已经写成 .pcm，接回来接着往后写。
+    const doneHandle = await root.getFileHandle(finalName).catch(() => null);
     const doneSize = doneHandle ? (await doneHandle.getFile()).size : 0;
-    if (doneSize > 0 && typeof doneHandle.move === 'function') {
-      await root.removeEntry(tmpName);
-      await doneHandle.move(tmpName);
+    if (doneSize > 0) {
+      await adoptFinishedFile(root, doneHandle, tmpName, finalName);
       fileHandle = await root.getFileHandle(tmpName);
       size = doneSize;
     }
@@ -81,6 +81,29 @@ async function open(message) {
   offset = size;
   reported = size;
   self.postMessage({ id: message.id, type: 'opened', offset });
+}
+
+/**
+ * 把已完成的 .pcm 挪回 .pcm.tmp，好接着往后追加。
+ *
+ * Chrome 有 `FileSystemFileHandle.move()`，一步改名；Firefox / Safari 有 OPFS
+ * 但没有 move()，只能"新建目标文件 → 流式拷贝 → 删旧文件"。这里刻意用
+ * `file.stream()` 而不是 `arrayBuffer()`：一小时的 16 kHz 单声道 PCM 约 115 MB，
+ * 一次性读入会把标签页内存打满，正是落盘要避免的事。
+ *
+ * 两条路都不可用时抛出，主线程会捕获并把本次录音降级到内存存储。
+ */
+async function adoptFinishedFile(root, sourceHandle, tmpName, finalName) {
+  if (typeof sourceHandle.move === 'function') {
+    await root.removeEntry(tmpName);
+    await sourceHandle.move(tmpName);
+    return;
+  }
+  const target = await root.getFileHandle(tmpName, { create: true });
+  const writable = await target.createWritable(); // 没有就抛 TypeError，由主线程降级
+  // pipeTo 按块搬运，峰值内存只有一个流块；结束时 writable 自动 close。
+  await (await sourceHandle.getFile()).stream().pipeTo(writable);
+  await root.removeEntry(finalName);
 }
 
 function append(message) {

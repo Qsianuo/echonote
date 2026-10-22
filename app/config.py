@@ -183,10 +183,11 @@ VAD_PREROLL_MS = _env_int("ECHONOTE_VAD_PREROLL_MS", 300)
 # with a falling tone and a soft coda ("呢", "啊", trailing nasal) that often
 # runs 200-400 ms *below* the VAD gate. A 150 ms tail cut those syllables off,
 # which is what left single-character rows ("文") hanging at the end of a
-# sentence. 400 ms covers the natural decay without dragging in real silence:
-# anything still lower than the gate by a wide margin is trimmed anyway (see
+# sentence. 1000 ms (1 s) covers the natural decay and then some, so a
+# trailing particle or a soft last word is never lost to the cut; anything
+# still lower than the gate by a wide margin is trimmed anyway (see
 # ``Segmenter._finalize``).
-VAD_TAIL_KEEP_MS = _env_int("ECHONOTE_VAD_TAIL_KEEP_MS", 400)
+VAD_TAIL_KEEP_MS = _env_int("ECHONOTE_VAD_TAIL_KEEP_MS", 1000)
 
 # A final whose text equals the previous one, on a segment *shorter* than
 # this, is one hallucination blip rather than two sentences. Measured in the

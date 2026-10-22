@@ -38,7 +38,6 @@
     modelPill: document.getElementById('model-pill'),
     language: document.getElementById('language'),
     modelSelect: document.getElementById('model-select'),
-    hotwordsInput: document.getElementById('hotwords-input'),
     localNoteText: document.getElementById('local-note-text'),
     footerBackend: document.getElementById('footer-backend'),
     footerPrivacy: document.getElementById('footer-privacy'),
@@ -74,7 +73,6 @@
     playTime: document.getElementById('play-time'),
   };
 
-  const HOTWORDS_KEY = 'echonote.hotwords';
 
   // 波形几何只在初始化与 resize 时量（Waveform.measure）；逐帧绘制只读缓存，
   // 不再和字幕滚动交替读写布局。
@@ -86,26 +84,6 @@
 
   // 字幕行索引：id -> { item, row }。替代每次遍历 el.finals.children 的线性查找。
   const rowIndex = Wave.RowIndex.create();
-
-  function loadHotwords() {
-    try {
-      return (localStorage.getItem(HOTWORDS_KEY) || '').slice(0, 200);
-    } catch {
-      return ''; // private mode / storage disabled: the field still works
-    }
-  }
-
-  // "Never set" and "deliberately emptied" are different states: the first
-  // should take the server's starter glossary, the second must stay empty.
-  // Testing the value instead of the key meant a user who cleared the box had
-  // the default written back on every reload.
-  function hotwordsTouched() {
-    try {
-      return localStorage.getItem(HOTWORDS_KEY) !== null;
-    } catch {
-      return false;
-    }
-  }
 
   // Which end of the wire does the recognition. Not cosmetic: with a remote
   // backend the audio does leave the machine, and this page has been claiming
@@ -128,19 +106,8 @@
     }
   }
 
-  function saveHotwords(value) {
-    try {
-      localStorage.setItem(HOTWORDS_KEY, value);
-    } catch {
-      /* nothing to do; the value lives for this page only */
-    }
-  }
-
   const state = {
     ws: null,
-    // Domain words sent with every `config`. Measured on the 75 MB model:
-    // 31.0% -> 10.3% character error rate on the same clip.
-    hotwords: loadHotwords(),
     connected: false,
     modelReady: false,
     modelKey: '',
@@ -599,7 +566,6 @@
         language: state.language,
         epoch: Math.max(1, state.epoch),
         origin_ms: Math.round(state.sessionOriginMs || 0),
-        hotwords: state.hotwords,
       })
     );
   }
@@ -814,13 +780,6 @@
         el.footerModel.textContent = state.modelName;
       }
 
-      // The server ships a starter glossary (the app's own vocabulary). Use it
-      // only when the user has never touched the field — a cleared box must
-      // stay cleared, or the default comes back on every reload.
-      if (el.hotwordsInput && !hotwordsTouched() && config.hotwords) {
-        state.hotwords = String(config.hotwords);
-        el.hotwordsInput.value = state.hotwords;
-      }
       setOfflineBadge(config.offline_ready);
       if (el.versionTag && config.version) el.versionTag.textContent = `v${config.version}`;
       applyBackendNote(config);
@@ -2309,19 +2268,6 @@
 
   if (el.modelSelect) {
     el.modelSelect.addEventListener('change', () => switchModel(el.modelSelect.value));
-  }
-
-  if (el.hotwordsInput) {
-    el.hotwordsInput.value = state.hotwords;
-    let hotwordsTimer = null;
-    el.hotwordsInput.addEventListener('input', () => {
-      state.hotwords = el.hotwordsInput.value.trim().slice(0, 200);
-      saveHotwords(state.hotwords);
-      // Typing is not a reason to rebuild the decoder prompt on every key:
-      // debounce until the user pauses.
-      clearTimeout(hotwordsTimer);
-      hotwordsTimer = setTimeout(sendConfig, 400);
-    });
   }
 
   /**

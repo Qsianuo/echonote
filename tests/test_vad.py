@@ -42,10 +42,10 @@ def test_single_utterance_bounds():
     assert len(events) == 1
     assert close(events[0]["start"], 0.0)
     assert close(events[0]["end"], 1.2)
-    # Audio keeps the trailing coda (up to VAD_TAIL_KEEP_MS=400 ms) but must
+    # Audio keeps the trailing coda (up to VAD_TAIL_KEEP_MS=1000 ms) but must
     # not swallow the whole 1 s of silence.
     duration = len(events[0]["audio"]) / 16000
-    assert 1.2 <= duration <= 1.7
+    assert 1.2 <= duration <= 2.3
 
 
 def test_two_utterances_keep_the_gap():
@@ -94,7 +94,7 @@ def test_flush_returns_the_open_segment():
 def test_tail_audio_is_trimmed():
     """Pure silence past the last voiced frame is trimmed back to the tail window.
 
-    The window is now 400 ms (``config.VAD_TAIL_KEEP_MS``) instead of the old
+    The window is now 1000 ms (``config.VAD_TAIL_KEEP_MS``) instead of the old
     hard-coded 150 ms, so a 1 s utterance is allowed to grow to ~1.4 s before
     the pure-silence tail is cut. Anything lower than the gate is silence; the
     tail window is what keeps a soft coda ("呢", "啊") from being clipped.
@@ -104,7 +104,7 @@ def test_tail_audio_is_trimmed():
     assert len(events) == 1
 
     duration = len(events[0]["audio"]) / 16000
-    assert duration < 1.5
+    assert duration < 2.3
 
 
 def test_segment_start_property_tracks_current_segment():
@@ -178,7 +178,7 @@ def test_finalize_reports_finished_at():
 # the subtitle would land 300 ms late — and no other assertion catches it.
 
 SAMPLE_RATE = 16000
-TAIL_FRAMES = int(400 / 30)  # VAD_TAIL_KEEP_MS=400 ms, in 30 ms frames
+TAIL_FRAMES = int(1000 / 30)  # VAD_TAIL_KEEP_MS=1000 ms, in 30 ms frames
 
 
 def _span_samples(event: dict) -> int:
@@ -246,7 +246,7 @@ def test_trailing_coda_below_the_gate_is_kept():
     duration = len(events[0]["audio"]) / SAMPLE_RATE
     # The quiet tail is part of the utterance: the audio must extend past the
     # last *loud* frame by at least the tail window.
-    assert duration >= 0.6 + 0.3
+    assert duration >= 0.6 + 0.5
 
 
 def test_pure_silence_tail_is_trimmed_back_to_the_window():
@@ -256,8 +256,8 @@ def test_pure_silence_tail_is_trimmed_back_to_the_window():
 
     assert len(events) == 1
     duration = len(events[0]["audio"]) / SAMPLE_RATE
-    # 1 s of speech + up to 400 ms of tail window, never the full 3 s.
-    assert 1.0 <= duration < 1.5
+    # 1 s of speech + up to 1000 ms of tail window, never the full 3 s.
+    assert 1.0 <= duration < 2.3
 
 
 def test_end_timestamp_marks_the_last_voiced_frame():

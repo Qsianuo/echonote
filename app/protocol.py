@@ -23,6 +23,7 @@ and versioned anyway: the message set changed again.
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Any
 
@@ -298,6 +299,11 @@ def validate(message: dict) -> dict:
             # ``True`` segment would pass and read as "1.0 ms".
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 raise ProtocolError(f"timing.segments[{name!r}] must be a number")
+            # nan compares False against everything, so the sign check below
+            # would wave it through and poison the client with a number that
+            # cannot be rendered.
+            if not math.isfinite(value):
+                raise ProtocolError(f"timing.segments[{name!r}] must be finite")
             if value < 0:
                 raise ProtocolError(f"timing.segments[{name!r}] must be >= 0")
 

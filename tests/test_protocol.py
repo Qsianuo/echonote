@@ -181,6 +181,16 @@ def test_timing_rejects_non_numeric_segments(bad):
         protocol.validate(msg)
 
 
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_timing_rejects_non_finite_segments(bad):
+    """``nan`` compares False against every bound, so ``>= 0`` alone lets it in."""
+    msg = protocol.timing(
+        epoch=1, turn_id="1-1", speech_finished_at=100.0, segments={"to_first_text_ms": bad}
+    )
+    with pytest.raises(protocol.ProtocolError):
+        protocol.validate(msg)
+
+
 def test_timing_rejects_a_missing_field():
     msg = protocol.timing(epoch=1, turn_id="1-1", speech_finished_at=100.0, segments={})
     del msg["segments"]

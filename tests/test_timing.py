@@ -19,15 +19,15 @@ from fastapi.testclient import TestClient
 
 from app import config, main, protocol, stt
 from app.timing import TurnTiming
-from conftest import FRAME, speech
+from conftest import FRAME, silence, speech
 
 
 def test_marks_are_relative_to_speech_finished():
     t = TurnTiming(speech_started_at=97.0, speech_finished_at=100.0)
-    t.mark("vad_done", 100.9)
-    t.mark("final_text", 102.14)
-    assert t.since("vad_done") == pytest.approx(900.0)
-    assert t.since("final_text") == pytest.approx(2140.0)
+    t.mark("final_text", 100.9)
+    t.mark("refined", 102.14)
+    assert t.since("final_text") == pytest.approx(900.0)
+    assert t.since("refined") == pytest.approx(2140.0)
 
 
 def test_marks_are_also_relative_to_speech_started():
@@ -53,7 +53,6 @@ def test_payload_omits_unmeasured_segments():
 
 def test_payload_maps_every_measured_mark_to_its_key():
     t = TurnTiming(speech_started_at=99.0, speech_finished_at=100.0)
-    t.mark("vad_done", 100.0)
     t.mark("first_text", 100.214)
     t.mark("final_text", 102.9801)
     t.mark("refined", 104.5)
@@ -73,8 +72,6 @@ def test_payload_maps_every_measured_mark_to_its_key():
             "to_refined_ms": 4500.0,
         },
     }
-    # ``vad_done`` is an anchor for the log line, not a wire segment.
-    assert "to_vad_done_ms" not in p["segments"]
 
 
 def test_payload_never_uses_null_for_a_missing_mark():
@@ -143,6 +140,144 @@ def _send_speech(ws, seconds: float) -> None:
     samples = (speech(seconds) * 32767).astype(np.int16)
     for start in range(0, len(samples) - FRAME + 1, FRAME):
         ws.send_bytes(samples[start : start + FRAME].tobytes())
+
+
+def _send_silence(ws, seconds: float) -> None:
+    samples = (silence(seconds) * 32767).astype(np.int16)
+    for start in range(0, len(samples) - FRAME + 1, FRAME):
+        ws.send_bytes(samples[start : start + FRAME].tobytes())
+
+
+def _receive_until(ws, kind: str, limit: int = 40) -> dict:
+    for _ in range(limit):
+        message = ws.receive_json()
+        if message.get("type") == kind:
+            return message
+    raise AssertionError(f"no {kind} message within {limit} frames")
+
+
+def test_a_dropped_misfire_does_not_poison_the_next_sentence(client, monkeypatch):
+    """A blip shorter than ``VAD_MIN_SPEECH_MS`` leaves the segmenter as no event.
+
+    ``Segmenter._finalize`` returns ``None`` for it, so the worker sees an
+    empty ``events`` list and — before the fix — kept the captioner and the
+    turn's start clock pointed at the discarded segment. The next sentence then
+    inherited that origin, and ``to_first_text_ms`` silently spanned both.
+
+    The leading silence matters: ``Segmenter.current_audio`` refuses a buffer
+    under 250 ms, so a blip needs the 300 ms preroll in front of it before the
+    captioner is seeded at all. That is also what makes the misfire reachable
+    in a real room, where it is never the first sound of the session.
+    """
+    monkeypatch.setattr(stt, "is_ready", lambda: True)
+    monkeypatch.setattr(stt, "transcribe_live", lambda audio, language=None, **_: "实时字幕")
+    monkeypatch.setattr(
+        stt, "transcribe", lambda audio, language=None, fast=False, **_: "精修字幕"
+    )
+    monkeypatch.setattr(stt, "refine_enabled", lambda: False)
+
+    with client.websocket_connect("/ws") as ws:
+        ws.receive_json()  # status
+
+        _send_silence(ws, 0.4)  # fills the preroll ring
+        _send_speech(ws, 0.15)  # 150 ms of voice: opens a segment, too short to keep
+        _send_silence(ws, 1.2)  # longer than the hangover, so it is finalized as junk
+        time.sleep(0.9)  # a stale start clock would now be ~0.9 s too early
+
+        _send_speech(ws, 2.6)  # > MIN_FIRST_DECODE_S, so a caption is produced
+        time.sleep(0.6)
+        ws.send_text(json.dumps({"type": "flush"}))
+
+        messages: list[dict] = []
+        for _ in range(40):
+            messages.append(ws.receive_json())
+            if any(m["type"] == "timing" for m in messages):
+                break
+
+    kinds = [m["type"] for m in messages]
+    assert kinds.count("final") == 1
+    # The discarded blip never became a turn, so it also produced no timing.
+    assert kinds.count("timing") == 1
+    segments = next(m for m in messages if m["type"] == "timing")["segments"]
+    # Only the second sentence is measured: the partial lands a few ms after
+    # that sentence starts, nowhere near the 0.9 s gap in front of it.
+    assert segments["to_first_text_ms"] < 600
+
+
+def test_a_dropped_refinement_does_not_emit_a_second_timing(client, monkeypatch):
+    """When the accurate pass returns nothing the turn keeps its one timing.
+
+    The refinement is dropped (`_refine_loop` gets an empty text), so there is
+    no ``refine`` and therefore no second ``timing``. The empty flush below is
+    the proof: it emits exactly one partial, and a stray timing would have been
+    queued ahead of it.
+    """
+    monkeypatch.setattr(stt, "is_ready", lambda: True)
+    monkeypatch.setattr(stt, "transcribe_live", lambda audio, language=None, **_: "实时字幕")
+    monkeypatch.setattr(
+        stt, "transcribe", lambda audio, language=None, fast=False, **_: ""
+    )
+    monkeypatch.setattr(stt, "refine_enabled", lambda: True)
+
+    with client.websocket_connect("/ws") as ws:
+        ws.receive_json()  # status
+        _send_speech(ws, 1.2)
+        ws.send_text(json.dumps({"type": "flush"}))
+
+        final = _receive_until(ws, "final")
+        assert final["stable"] is False  # a refinement was promised
+        timing = _receive_until(ws, "timing")
+        assert "to_refined_ms" not in timing["segments"]
+
+        # Flushing an empty buffer emits one bare partial and nothing else.
+        ws.send_text(json.dumps({"type": "flush"}))
+        assert ws.receive_json()["type"] == "partial"
+
+
+def test_both_timings_of_a_turn_agree_on_the_epoch(client, monkeypatch):
+    """A mid-turn ``config`` bump must not make the two messages disagree.
+
+    ``final.id`` is "epoch-sequence" and is built from the epoch that was
+    current when the turn finished, so the id is the authority. Reading
+    ``self.epoch`` on the emission side made the pair drift apart as soon as
+    the client bumped it — which it does on every reconnect.
+    """
+    monkeypatch.setattr(stt, "is_ready", lambda: True)
+    monkeypatch.setattr(stt, "transcribe_live", lambda audio, language=None, **_: "实时字幕")
+
+    def slow_accurate(audio, language=None, fast=False, **_):
+        time.sleep(0.6)  # keep the refinement in flight across the epoch bump
+        return "精修字幕"
+
+    monkeypatch.setattr(stt, "transcribe", slow_accurate)
+    monkeypatch.setattr(stt, "refine_enabled", lambda: True)
+
+    with client.websocket_connect("/ws") as ws:
+        ws.receive_json()  # status
+        _send_speech(ws, 1.2)
+        ws.send_text(json.dumps({"type": "flush"}))
+
+        final = _receive_until(ws, "final")
+        first = _receive_until(ws, "timing")
+
+        ws.send_text(
+            json.dumps(
+                {
+                    "type": "config",
+                    "protocol": protocol.PROTOCOL_VERSION,
+                    "epoch": final["epoch"] + 1,
+                    "origin_ms": 0,
+                }
+            )
+        )
+
+        refined = _receive_until(ws, "refine")
+        second = _receive_until(ws, "timing")
+
+    assert refined["id"] == final["id"]
+    assert first["epoch"] == final["epoch"]
+    assert second["epoch"] == final["epoch"]
+    assert first["turn_id"] == second["turn_id"] == final["id"]
 
 
 def test_a_turn_reports_once_per_visible_milestone(client, monkeypatch, caplog):

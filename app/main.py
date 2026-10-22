@@ -408,6 +408,24 @@ class StreamingSession:
             self._first_text_at = time.perf_counter()
         self._emit(protocol.partial(text=text, epoch=self.epoch, start=start_s))
 
+    def _end_utterance_state(self) -> None:
+        """Forget everything that belonged to the utterance that just ended.
+
+        Called from *every* exit of the worker loop, including the one with no
+        message at all: the segmenter drops a segment shorter than
+        ``VAD_MIN_SPEECH_MS`` without an event (``Segmenter._finalize`` returns
+        ``None``), and leaving the state set made the next sentence inherit this
+        one's start clock and first-caption mark — ``to_first_text_ms`` then
+        spanned two utterances. The captioner is reset for the same reason: it
+        was still holding the discarded audio and would have kept feeding the
+        next sentence into that buffer.
+        """
+        self._turn_started_at = None
+        self._first_text_at = None
+        self._last_partial = ""
+        if self._live is not None:
+            self._live.reset()
+
     # ------------------------------------------------------------- worker
 
     def _run(self) -> None:
@@ -431,7 +449,7 @@ class StreamingSession:
                         self._complete(tail)
                     in_utterance = False
                     self._speaking = False
-                    self._last_partial = ""
+                    self._end_utterance_state()
                     # Make sure a stale partial line disappears in the UI.
                     self._emit(protocol.partial(text="", epoch=self.epoch, start=0.0))
                     continue
@@ -439,9 +457,14 @@ class StreamingSession:
                 events = segmenter.push(chunk)
                 for event in events:
                     self._complete(event)
-                if events:
-                    # The segmenter closed the utterance (pause or 30 s cap).
+                if events or (in_utterance and not segmenter.in_speech):
+                    # The segment the captioner was pointed at is over. The
+                    # second half of the condition is a segment the segmenter
+                    # *discarded*: it produces no event, so relying on
+                    # ``events`` alone left ``in_utterance`` and the turn's
+                    # start clock stuck on a segment that no longer exists.
                     in_utterance = False
+                    self._end_utterance_state()
 
                 if self._live is not None and segmenter.in_speech:
                     if in_utterance:
@@ -490,8 +513,7 @@ class StreamingSession:
         if started_at is None:
             started_at = event["finished_at"] - (end - start)
         turn = TurnTiming(started_at, event["finished_at"])
-        turn.mark("vad_done")
-        # Mark 2/4: the first partial was stamped on the caption thread, before
+        # Mark 1/3: the first partial was stamped on the caption thread, before
         # this object existed. Consuming it clears the flag for the next turn —
         # including on every early return below, which is why it is taken here
         # and not next to the emit.
@@ -537,12 +559,17 @@ class StreamingSession:
 
         self._final_seq += 1
         final_id = f"{self.epoch}-{self._final_seq}"
+        # One epoch for the whole turn, read back out of the id it was baked
+        # into. Taking it from ``self.epoch`` again on the emission side let a
+        # client `config` (which bumps the epoch on every reconnect) land
+        # between the two writes, so the same turn could report two epochs.
+        epoch = int(final_id.split("-")[0])
         self._last_partial = ""
         stable = not stt.refine_enabled()
         self._emit(
             protocol.final(
                 final_id=final_id,
-                epoch=self.epoch,
+                epoch=epoch,
                 text=text,
                 start=start,
                 end=end,
@@ -550,10 +577,10 @@ class StreamingSession:
             )
         )
         self._last_final_text = text
-        # Mark 3/4: the text is on screen. Reported once per turn — this is
+        # Mark 2/3: the text is on screen. Reported once per turn — this is
         # the ``to_final_text_ms`` number that every latency claim is about.
         turn.mark("final_text")
-        self._emit_timing(final_id, self.epoch, turn)
+        self._emit_timing(final_id, epoch, turn)
         if not stable:
             # Kept until the accurate pass lands (``_refine_loop``) or the job
             # is dropped, whichever comes first.
@@ -635,7 +662,7 @@ class StreamingSession:
                 )
             )
             if turn is not None:
-                # Mark 4/4: the accurate text replaced the provisional one.
+                # Mark 3/3: the accurate text replaced the provisional one.
                 # The second and last ``timing`` message of this turn.
                 turn.mark("refined")
                 self._emit_timing(final_id, epoch, turn)

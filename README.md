@@ -25,7 +25,7 @@
 
 - 🎙 **一键录音** —— 浏览器麦克风采集，16 kHz 单声道 PCM
 - ⚡ **实时转写** —— 边说边出字，停顿后自动断句
-- 🔒 **完全本地** —— 语音识别使用本地 faster-whisper 模型，音频不上传任何服务器
+- 🔒 **默认完全本地** —— 语音识别默认用本地 faster-whisper 模型，音频不出本机；也可以显式切到远程 OpenAI 兼容接口，见[远程识别](#-远程识别可选)
 - ⚡ **边说边出字** —— 两个模型分工：`base` 边说边画实时字幕，`medium` 在每句结束后重写定稿（本机样本字符错误率 0）；界面里可随时切换档位
 - 🔌 **真正离线** —— 模型在磁盘上时，识别全程零联网；`--offline` 还能强制断网启动
 - 🌍 **多语言** —— 中文 / 英文 / 日文 / 韩文 / 法文 / 德文 / 西班牙文 / 俄文，可自动识别
@@ -342,11 +342,58 @@ WebSocket ──▶ FastAPI（每连接一会话）
 
 ## 🔒 隐私
 
+**默认（本地模式）**
+
 - 音频只在本机的 `127.0.0.1` 与服务端通信，**不经过互联网**
 - 识别使用本地模型，**不需要 API Key**
 - 转写文本只存在当前页面的内存里，关闭或刷新页面即丢失；录音分片落在浏览器自己的站点存储（OPFS）里，服务端既不保存音频也不写临时文件（导出的文件由你自己保存）
 - 无遥测、无统计、无第三方请求（仅首次模型下载）
 - 日志不记录转写文本
+
+**远程模式（需显式配置，默认关闭）**
+
+配置 `ECHONOTE_ASR_REMOTE_KEY` 之后，上面第一条与第三条的前半句不再成立：
+
+- 每段音频会被编码成 WAV 并**发送到你配置的第三方服务**，由对方完成识别
+- 发出去的是音频片段（一句几十到几百 KB），不是整场录音；但对方确实能听到你说的话
+- 页面上的提示会在启用后自动改写，不会继续声称「不上传」
+
+---
+
+## ☁️ 远程识别（可选）
+
+本地 `large-v3-turbo` 在 4 核 CPU 上实时因子约 2.5——转录 1 分钟录音要 2.5 分钟 CPU 时间。若本机算力不够，可以把识别交给远程服务。
+
+**为什么默认不做**：它会把音频送出本机。这是产品取舍，所以必须由你显式打开。
+
+兼容任何 OpenAI 风格的 `/audio/transcriptions` 接口（Groq、硅基流动、自建 faster-whisper server 等）。
+
+```bash
+# 例：Groq 免费档（2000 次/日、8 小时音频/日）
+set ECHONOTE_ASR_REMOTE_KEY=gsk_xxxxxxxx
+start.bat
+```
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `ECHONOTE_ASR_REMOTE_URL` | `https://api.groq.com/openai/v1/audio/transcriptions` | 接口地址 |
+| `ECHONOTE_ASR_REMOTE_KEY` | 空 | **填了才启用**；空 = 纯本地 |
+| `ECHONOTE_ASR_REMOTE_MODEL` | `whisper-large-v3-turbo` | 服务商的模型名 |
+| `ECHONOTE_ASR_REMOTE_TIMEOUT_S` | `20` | 定稿请求超时 |
+| `ECHONOTE_ASR_REMOTE_LIVE_TIMEOUT_S` | `6` | 实时字幕超时（必须短，否则排队） |
+| `ECHONOTE_ASR_REMOTE_FAIL_THRESHOLD` | `3` | 连续失败几次后熔断 |
+| `ECHONOTE_ASR_REMOTE_COOLDOWN_S` | `30` | 熔断持续多久后重试 |
+| `ECHONOTE_ASR_REMOTE_PROMPT` | 空 | 作为 `prompt` 发送；**建议留空**，填不匹配的文本会让模型复读它 |
+| `ECHONOTE_ASR_REMOTE_ONLY` | `0` | **严格模式**：绝不回落本地；缺 key 时直接报错而不是静默用本地 |
+
+**建议同时打开 `ECHONOTE_ASR_REMOTE_ONLY=1`**：否则远程失败时会静默回落本地，CPU 又被打满，而界面仍显示远程。打开后失败会明确报错，`/api/ready` 的 `error` 会说明原因。
+
+**行为**
+
+- 远程失败或熔断期间，自动回退到本地模型（前提是本地模型已加载）
+- 远程模式下不再加载本地权重，CPU 占用接近空载
+- `GET /api/ready` 的 `backend` 字段为 `remote`，`remote_cooldown_s` 表示熔断剩余秒数
+- `offline_ready` 会变成 `false`——远程模式依赖网络，这是如实反映
 
 ---
 

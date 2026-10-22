@@ -22,6 +22,7 @@ from pathlib import Path
 import numpy as np
 
 from . import config, models
+from . import asr_remote
 
 log = logging.getLogger("echonote.stt")
 
@@ -155,6 +156,17 @@ def load_live() -> bool:
     """
     global _live_model, _live_key, _live_error
 
+    if config.ASR_REMOTE:
+        # The live model would never run, so loading 145 MB of weights for it
+        # is pure waste — and the whole point of the switch is to stop paying
+        # that cost.
+        with _live_load_lock:
+            _live_model = None
+            _live_key = asr_remote.model_label()
+            _live_error = None
+            _live_ready.set()
+        return True
+
     main = config.model_target()
     target = live_target()
     if target.key == main.key and target.path == main.path:
@@ -257,6 +269,30 @@ def load() -> bool:
     """
     global _model, _error, _loading, _attempts, _auto_retries, _last_failure_at
     global _loaded_key, _retry_blocked
+
+    if config.ASR_REMOTE:
+        # Nothing to load: the decoder sits at the other end of an HTTP call.
+        # Marking ready here (rather than skipping the load entirely) keeps
+        # every caller's ``is_ready`` gate working unchanged.
+        _loaded_key = asr_remote.model_label()
+        _error = None
+        _ready.set()
+        return True
+
+    if config.ASR_REMOTE_ONLY:
+        # Recognition was explicitly pinned to the remote backend and the
+        # backend is not configured. Loading a local model here would be the
+        # silent fallback this mode exists to prevent, so fail with something
+        # the UI can show instead.
+        _error = (
+            "远程识别已启用（ECHONOTE_ASR_REMOTE_ONLY=1），但缺少 API Key。"
+            "请设置 ECHONOTE_ASR_REMOTE_KEY，或写入 models/asr-remote.key。"
+        )
+        _loaded_key = None
+        _ready.clear()
+        _retry_blocked = True
+        log.error("%s", _error)
+        return False
 
     generation = _generation
     with _load_lock:
@@ -467,7 +503,7 @@ def status() -> dict:
     attempts = _attempts
     target = config.model_target()
     live = live_target()
-    return {
+    result = {
         "ready": _ready.is_set(),
         "model": target.loader_value,
         "error": _error,
@@ -497,6 +533,38 @@ def status() -> dict:
         "refine_blocked": refine_blocked_reason(),
         "live_ms": live_ms(),
     }
+    if config.ASR_REMOTE:
+        # The local model names are meaningless here: nothing was loaded, and
+        # reporting "base" while an HTTP call does the work would send anyone
+        # debugging this in the wrong direction.
+        result.update(asr_remote.status())
+        result["backend"] = "remote"
+        result["model"] = config.ASR_REMOTE_MODEL
+        result["model_key"] = "remote"
+        result["model_label"] = "远程"
+        result["live_model"] = config.ASR_REMOTE_MODEL
+        result["live_model_key"] = "remote"
+        result["live_model_label"] = "远程"
+        result["rtf"] = None
+        # Recognition now needs the network, so the offline promise does not
+        # hold. Saying otherwise would be a lie the UI repeats to the user.
+        result["offline_ready"] = False
+    else:
+        result["backend"] = "remote" if config.ASR_REMOTE_ONLY else "local"
+        if config.ASR_REMOTE_ONLY:
+            # Pinned to remote but unusable: report the backend the user chose
+            # (so the UI stops claiming "本地推理") and let ``error``/``ready``
+            # carry the reason. Silently reporting "local" is what made this
+            # invisible in the first place.
+            result["model"] = config.ASR_REMOTE_MODEL
+            result["model_key"] = "remote"
+            result["model_label"] = "远程"
+            result["live_model"] = config.ASR_REMOTE_MODEL
+            result["live_model_key"] = "remote"
+            result["live_model_label"] = "远程"
+            result["rtf"] = None
+            result["offline_ready"] = False
+    return result
 
 
 # ``tiny`` cannot follow the full instruction: it *answers* it, which is how
@@ -623,13 +691,27 @@ def transcribe_live(
     if audio is None or len(audio) < config.SAMPLE_RATE * 0.25:
         return ""
 
+    lang = None if not language or language == "auto" else language
+    audio = _prepare(audio)
+
+    if config.ASR_REMOTE:
+        remote = asr_remote.transcribe(audio, lang, live=True)
+        if remote is not None:
+            # No prompt was sent, so there is nothing to strip an echo of.
+            return _clean(remote, None)
+        if config.ASR_REMOTE_ONLY:
+            # Strict mode: a failed remote call produces no caption. Falling
+            # back would put the audio on the CPU the user asked us to spare.
+            return ""
+
+    if config.ASR_REMOTE_ONLY and not config.ASR_REMOTE:
+        return ""  # pinned to remote, but not configured — see stt.load()
+
     model, lock = _live_engine()
     if model is None:
         return ""
 
-    lang = None if not language or language == "auto" else language
     prompt = _prompt_for(lang, _live_key)
-    audio = _prepare(audio)
 
     with lock:
         started = time.perf_counter()
@@ -676,6 +758,10 @@ def transcribe_live(
 
 def live_ms() -> int | None:
     """Median wall time of the last live decodes, in milliseconds."""
+    if config.ASR_REMOTE:
+        # Same number, measured on the other side of the wire: what the user
+        # cares about is how long a caption took, not who computed it.
+        return asr_remote.median_ms()
     if not _live_calls:
         return None
     values = sorted(_live_calls)
@@ -700,13 +786,27 @@ def transcribe(
     if audio is None or len(audio) < config.SAMPLE_RATE * 0.2:
         return ""
 
+    lang = None if not language or language == "auto" else language
+    audio = _prepare(audio)
+
+    if config.ASR_REMOTE:
+        # Deliberately outside ``_infer_lock``: no CPU work happens here, so
+        # holding the local inference lock would serialise network calls for
+        # no reason.
+        remote = asr_remote.transcribe(audio, lang)
+        if remote is not None:
+            return _clean(remote, None)
+        if config.ASR_REMOTE_ONLY:
+            return ""  # strict mode: no local fallback
+
+    if config.ASR_REMOTE_ONLY and not config.ASR_REMOTE:
+        return ""  # pinned to remote, but not configured — see stt.load()
+
     model = _model
     if model is None or not _ready.is_set():
         return ""
 
-    lang = None if not language or language == "auto" else language
     prompt = _prompt_for(lang, _loaded_key)
-    audio = _prepare(audio)
 
     with _infer_lock:
         started = time.perf_counter()
@@ -762,7 +862,57 @@ def _clean(text: str, prompt: str | None = None) -> str:
     text = _collapse_repetition(text)
     if prompt:
         text = _strip_echo(text, prompt).strip()
+    if _is_hallucination(text):
+        return ""
     return text
+
+
+def _core_chars(text: str) -> str:
+    """``text`` with punctuation and whitespace removed, for shape comparisons."""
+    return re.sub(r"[\s\W_]+", "", text or "")
+
+
+def same_line(a: str, b: str) -> bool:
+    """True when two finals are the same line wearing different punctuation.
+
+    The repeat guard compared raw strings, so one noise blip that decoded to
+    "转写。" and then to "转写。 转写" counted as two different sentences and
+    both reached the transcript. Comparing shapes catches that without
+    touching the duration guard, which is what keeps genuinely repeated
+    sentences apart.
+    """
+    ca, cb = _core_chars(a), _core_chars(b)
+    if not ca or not cb:
+        return False
+    if ca == cb:
+        return True
+    short, long_ = sorted((ca, cb), key=len)
+    return long_.replace(short, "") == ""
+
+
+def _is_hallucination(text: str) -> bool:
+    """True when the whole line is caption boilerplate, not speech.
+
+    The test is deliberately all-or-nothing: strip every known boilerplate
+    word and require that nothing is left. A real sentence survives because
+    it contains words the list does not know — "这句话里的转写是真的" keeps
+    its remaining characters. What this catches is the loop seen in the field,
+    where a noise-only segment decodes to "转写。" and the next one to
+    "转写。 转写" or "符号转写。", none of which an exact-match list would hit.
+
+    Longer strings are skipped outright: a 30-character line is a sentence,
+    and running the word-stripping over it would only invite false positives.
+    """
+    core = _core_chars(text)
+    if not core or len(core) > 12:
+        return False
+    rest = core
+    # Longest first, so "语音转写" is consumed as a unit rather than leaving
+    # "语音" behind after "转写" matches.
+    for word in sorted(config.ASR_HALLUCINATION_TEXTS, key=len, reverse=True):
+        if word in rest:
+            rest = rest.replace(word, "")
+    return not rest
 
 
 def _collapse_repetition(text: str) -> str:

@@ -7,12 +7,15 @@ noise floor and ends after a short period of silence.
 
 from __future__ import annotations
 
+import logging
 import time
 from collections import deque
 
 import numpy as np
 
 from . import config
+
+log = logging.getLogger("echonote.vad")
 
 FRAME_MS = 30
 
@@ -52,6 +55,15 @@ class Segmenter:
         self.silence_run = 0
         self.segment_start_frame = 0
         self.last_speech_frame = 0
+
+        # Diagnostics (see config.VAD_DEBUG): the most recent frame level and
+        # the threshold it was compared against. Reading these from the worker
+        # is the only way to tell "the mic is quiet" apart from "the gate is
+        # too high" without guessing.
+        self.last_rms = 0.0
+        self.last_threshold = self.base_threshold
+        # Loudest frame seen since the current segment started, for diagnostics.
+        self.segment_peak_rms = 0.0
 
     # ------------------------------------------------------------------ API
 
@@ -102,6 +114,10 @@ class Segmenter:
         rms = float(np.sqrt(np.mean(np.square(frame), dtype=np.float64)))
         threshold = max(self.base_threshold, self.noise_floor * 3.0)
         is_voice = rms > threshold
+        self.last_rms = rms
+        self.last_threshold = threshold
+        if rms > self.segment_peak_rms:
+            self.segment_peak_rms = rms
 
         # Adapt the noise floor only when the frame is clearly not speech.
         if rms < max(self.base_threshold * 0.6, self.noise_floor * 1.5):
@@ -159,11 +175,27 @@ class Segmenter:
 
         start = self.segment_start_frame * FRAME_MS / 1000.0
         end = (self.last_speech_frame + 1) * FRAME_MS / 1000.0
-        speech_ok = self.speech_frames >= self.min_speech_frames
+        # Snapshot before _reset_segment() clears them.
+        speech_frames = self.speech_frames
+        peak_rms = self.segment_peak_rms
+        speech_ok = speech_frames >= self.min_speech_frames
 
         self._reset_segment()
 
         if not speech_ok or audio is None or len(audio) < self.sample_rate * 0.25:
+            # Silent until now, and the single most common reason a spoken
+            # sentence never reaches the transcript: the gate opened for too
+            # few frames, or the segment was too short to be worth decoding.
+            if config.VAD_DEBUG:
+                log.info(
+                    "[SEG-DROP] speech_frames=%d/%d audio_ms=%d peak=%.4f thr=%.4f floor=%.4f",
+                    speech_frames,
+                    self.min_speech_frames,
+                    0 if audio is None else int(len(audio) * 1000 / self.sample_rate),
+                    peak_rms,
+                    self.last_threshold,
+                    self.noise_floor,
+                )
             return None
         return {
             "type": "final",
@@ -179,3 +211,4 @@ class Segmenter:
         self.speech_frames = 0
         self.silence_run = 0
         self.last_speech_frame = self.segment_start_frame
+        self.segment_peak_rms = 0.0

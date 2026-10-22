@@ -81,8 +81,17 @@ def status(
     refine: bool = False,
     refine_blocked: str | None = None,
     live_ms: int | None = None,
+    **extra: object,
 ) -> dict:
-    return {
+    """Build a ``status`` message.
+
+    ``**extra`` carries fields the server tracks but the protocol does not
+    name yet — the backend switch (``backend``, ``remote_model``, breaker
+    state) rides here. Dropping it silently would mean the UI cannot tell the
+    user whether their audio is leaving the machine, so unknown keys are
+    forwarded rather than ignored.
+    """
+    message = {
         "type": "status",
         "protocol": PROTOCOL_VERSION,
         "ready": bool(ready),
@@ -116,6 +125,9 @@ def status(
         # Median live decode time in ms — the number the user feels.
         "live_ms": None if live_ms is None else int(live_ms),
     }
+    for key, value in extra.items():
+        message.setdefault(key, value)
+    return message
 
 
 def partial(*, text: str, epoch: int, start: float) -> dict:

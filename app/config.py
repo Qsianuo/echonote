@@ -188,6 +188,88 @@ VAD_PREROLL_MS = _env_int("ECHONOTE_VAD_PREROLL_MS", 300)
 # words from the transcript.
 REPEAT_MAX_DURATION_S = _env_float("ECHONOTE_REPEAT_MAX_DURATION_S", 1.5)
 
+# Level instrumentation for "I spoke and nothing appeared" reports.
+#
+# Without it the only evidence is a transcript with rows missing, which cannot
+# distinguish the three causes: the mic delivers a quiet signal, the VAD gate
+# sits above the speech level, or the decode is filtered afterwards. Logs the
+# peak frame RMS and the live threshold once a second, plus one line per
+# segment (duration, text length, why it was dropped). Off by default because
+# it is one line a second.
+VAD_DEBUG = _env_flag("ECHONOTE_VAD_DEBUG")
+
+# --------------------------------------------------------------------------
+# Remote ASR backend (OpenAI-compatible /audio/transcriptions)
+# --------------------------------------------------------------------------
+#
+# Why: large-v3-turbo runs at rtf 2.48 on a 4-core CPU, and the live + refine
+# models compete for the same cores. A hosted Whisper answers the same audio in
+# well under a second.
+#
+# Why it is off unless configured: it sends the recording off the machine.
+# That contradicts the "audio never leaves this computer" claim the UI used to
+# make, so it is strictly opt-in and the UI reports which backend is live.
+#
+# Defaults point at Groq, whose free tier covers 2000 requests and 8 hours of
+# audio per day. Any OpenAI-compatible endpoint works: set the model name to
+# whatever the provider calls it.
+ASR_REMOTE_URL = os.getenv(
+    "ECHONOTE_ASR_REMOTE_URL",
+    "https://api.groq.com/openai/v1/audio/transcriptions",
+).strip()
+def _remote_key() -> str:
+    """API key from the environment, else from ``models/asr-remote.key``.
+
+    The file exists because setting an environment variable on Windows is a
+    per-window affair: close the terminal and the key is gone, which reads as
+    "the remote backend randomly stopped working". ``models/`` is gitignored,
+    so a key kept there cannot be committed by accident.
+    """
+    raw = os.getenv("ECHONOTE_ASR_REMOTE_KEY", "").strip()
+    if raw:
+        return raw
+    try:
+        return (
+            Path(MODEL_DIR) / "asr-remote.key"
+        ).read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+ASR_REMOTE_KEY = _remote_key()
+
+ASR_REMOTE_MODEL = os.getenv(
+    "ECHONOTE_ASR_REMOTE_MODEL", "whisper-large-v3-turbo"
+).strip()
+# Sent as ``prompt``. Empty by default: a hosted Whisper continues from the
+# prompt when the audio does not match it, which is how a session ends up
+# full of "转写。". ``language`` is passed separately and is enough to pin
+# Simplified Chinese.
+ASR_REMOTE_PROMPT = os.getenv("ECHONOTE_ASR_REMOTE_PROMPT", "").strip()
+ASR_REMOTE_TIMEOUT_S = _env_float("ECHONOTE_ASR_REMOTE_TIMEOUT_S", 20.0)
+# Live captions must fail fast: a 20 s timeout on a partial would stall the
+# queue behind it.
+ASR_REMOTE_LIVE_TIMEOUT_S = _env_float("ECHONOTE_ASR_REMOTE_LIVE_TIMEOUT_S", 6.0)
+ASR_REMOTE_FAIL_THRESHOLD = _env_int("ECHONOTE_ASR_REMOTE_FAIL_THRESHOLD", 3)
+ASR_REMOTE_COOLDOWN_S = _env_float("ECHONOTE_ASR_REMOTE_COOLDOWN_S", 30.0)
+# True when both the endpoint and a key are present. Kept as a separate flag
+# so a half-filled config silently stays local instead of failing every call.
+ASR_REMOTE = bool(ASR_REMOTE_URL and ASR_REMOTE_KEY)
+
+# Strict mode: never fall back to the local model, and refuse to start
+# recognition when the remote backend is not configured.
+#
+# Without it, a missing key silently degrades to local inference — the UI says
+# "本地推理", the CPU stays pegged, and nothing tells the user their audio is
+# being recognised on the machine they were trying to offload. Silent
+# degradation is the wrong default when the whole point of the switch is "do
+# not run this locally".
+ASR_REMOTE_ONLY = _env_flag("ECHONOTE_ASR_REMOTE_ONLY")
+# The combination that must surface as an error rather than a quiet fallback.
+ASR_REMOTE_MISCONFIGURED = ASR_REMOTE_ONLY and not ASR_REMOTE
+
+
+
 # Peak normalisation, experimental and **off by default**.
 #
 # Distant or quiet speech is the weakest point of the current pipeline, and
@@ -258,6 +340,38 @@ ASR_PROMPT_ZH_SHORT = os.getenv(
     "以下是普通话录音。",
 ).strip()
 
+# Caption boilerplate Whisper emits when a segment carries energy but no
+# speech. Measured in the field on `tiny`: room noise split by the VAD into
+# ~1 s blips, each one decoding to "转写。" — the model continuing the subtitle
+# convention it was trained on, not transcribing anything.
+#
+# These words are only dropped when the *whole* line is built out of them
+# (see ``stt._is_hallucination``), so a real sentence that happens to contain
+# "转写" or "订阅" survives untouched. The variants matter: the same session
+# produced "转写。", "符号转写。" and "转写。 转写", and an exact-match list
+# caught none of them.
+ASR_HALLUCINATION_TEXTS = (
+    "转写",
+    "转写符号",
+    "符号转写",
+    "语音转写",
+    "字幕",
+    "本字幕",
+    "中文字幕",
+    "字幕由",
+    "字幕制作",
+    "谢谢观看",
+    "谢谢大家观看",
+    "感谢观看",
+    "请不吝点赞",
+    "请点赞",
+    "点赞",
+    "订阅",
+    "关注",
+    "转发",
+    "打赏",
+)
+
 # Partial captions.
 #
 # ``LIVE_STEP_S`` is how much *new* audio must arrive before the live caption
@@ -314,12 +428,17 @@ REFINE_DRAIN_MAX_S = _env_float("ECHONOTE_REFINE_DRAIN_MAX_S", 60.0)
 # A starter glossary, not a guess about the user's life: this is the app's own
 # name, the one word every first recording says.
 #
-# Deliberately *one* term. hotwords are a decoder prompt, and `tiny` continues
-# from them when the next spoken word does not match: with "回声笔记 语音识别"
-# it emitted "语音识别 课今天天气…" — a stray character, deterministically, on
-# every run. A term the user does not actually say makes the transcript worse,
-# so the default stays minimal and everything else comes from the user.
-DEFAULT_HOTWORDS = "回声笔记"
+# Deliberately empty by default. hotwords are a decoder prompt, and `tiny`
+# continues from them when the next spoken word does not match: with
+# "回声笔记 语音识别" it emitted "语音识别 课今天天气…" — a stray character,
+# deterministically, on every run. A term the user does not actually say makes
+# the transcript worse, so the glossary now starts empty and only ever contains
+# what the user types for a specific recording.
+#
+# Field report behind this change: a photography glossary left in the box
+# (焦距 光圈 景深 …) turned a whole session into "转写。" rows — the decoder
+# followed the prompt instead of the audio. Empty is the safe default.
+DEFAULT_HOTWORDS = ""
 
 def _glossary_file() -> str | None:
     """Read ``models/hotwords.txt`` if the user keeps one there.

@@ -60,6 +60,40 @@ def test_clean_keeps_real_text():
     assert stt._clean("这是一段真实的话。") == "这是一段真实的话。"
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "转写。",
+        "转写",
+        "符号转写。",
+        "转写。 转写",
+        "转写。 转写。 转写",
+        "语音转写",
+        "字幕",
+        "中文字幕",
+    ],
+)
+def test_clean_drops_caption_boilerplate(text: str):
+    """Noise-only segments decode to these on `tiny`; none of them is speech.
+
+    Measured in the field: one session produced all of the variants above, so
+    the guard has to be a shape check rather than an exact-match list.
+    """
+    assert stt._clean(text, "以下是普通话录音。") == ""
+
+
+def test_clean_keeps_speech_that_mentions_a_boilerplate_word():
+    text = "这句话里的转写是真的"
+    assert stt._clean(text, "以下是普通话录音。") == text
+
+
+def test_same_line_ignores_punctuation_and_repetition():
+    assert stt.same_line("今天天气很好。", "今天天气很好")
+    assert stt.same_line("转写。", "转写。 转写")
+    assert not stt.same_line("今天天气很好。", "明天天气很好。")
+    assert not stt.same_line("", "")
+
+
 def test_zh_gets_the_simplified_chinese_prompt(fake):
     assert stt.transcribe(audio(), "zh") == "你好"
     assert fake.calls[0]["initial_prompt"] == stt.config.ASR_PROMPT_ZH

@@ -193,6 +193,14 @@ def get_config() -> dict:
         "version": config.APP_VERSION,
         "stage": config.APP_STAGE,
         "protocol": protocol.PROTOCOL_VERSION,
+        # "local" or "remote": where recognition actually runs. The UI has to
+        # say which, because only one of them keeps the audio on this machine.
+        "asr_backend": "remote"
+        if (config.ASR_REMOTE or config.ASR_REMOTE_ONLY)
+        else "local",
+        "asr_remote_model": config.ASR_REMOTE_MODEL
+        if (config.ASR_REMOTE or config.ASR_REMOTE_ONLY)
+        else None,
         "model": target.loader_value,
         "model_label": target.label,
         "model_key": target.key,
@@ -439,6 +447,9 @@ class StreamingSession:
     def _run(self) -> None:
         segmenter = Segmenter()
         in_utterance = False
+        debug = config.VAD_DEBUG
+        dbg_peak = 0.0
+        dbg_ms = 0.0
         try:
             while True:
                 try:
@@ -463,7 +474,28 @@ class StreamingSession:
                     continue
 
                 events = segmenter.push(chunk)
+                if debug:
+                    dbg_peak = max(dbg_peak, segmenter.last_rms)
+                    dbg_ms += len(chunk) * 1000.0 / config.SAMPLE_RATE
+                    if dbg_ms >= 1000.0:
+                        # One line a second: is the microphone delivering a
+                        # level the gate can open on, and where is the gate?
+                        log.info(
+                            "[VAD] peak=%.4f thr=%.4f floor=%.4f speaking=%s",
+                            dbg_peak,
+                            segmenter.last_threshold,
+                            segmenter.noise_floor,
+                            segmenter.in_speech,
+                        )
+                        dbg_peak = 0.0
+                        dbg_ms = 0.0
                 for event in events:
+                    if debug:
+                        log.info(
+                            "[SEG] dur=%.2fs audio_ms=%d",
+                            event["end"] - event["start"],
+                            int(len(event["audio"]) * 1000 / config.SAMPLE_RATE),
+                        )
                     self._complete(event)
 
                 # "Still the same utterance?" is a question about segment
@@ -556,6 +588,11 @@ class StreamingSession:
 
         text = (text or "").strip()
         if not text:
+            # The segment reached the decoder and came back empty — either the
+            # transcript was filtered (boilerplate, low confidence) or no
+            # speech was recognised at all.
+            if config.VAD_DEBUG:
+                log.info("[ASR-DROP] empty text, dur=%.2fs", end - start)
             return
 
         # The same text twice in a row on a *short* segment is one
@@ -566,7 +603,7 @@ class StreamingSession:
         # is longer than REPEAT_MAX_DURATION_S and keeps both rows, because
         # dropping the second one would lose words from the transcript.
         if (
-            text == self._last_final_text
+            stt.same_line(text, self._last_final_text)
             and (end - start) < config.REPEAT_MAX_DURATION_S
         ):
             log.info(

@@ -39,6 +39,9 @@
     language: document.getElementById('language'),
     modelSelect: document.getElementById('model-select'),
     hotwordsInput: document.getElementById('hotwords-input'),
+    localNoteText: document.getElementById('local-note-text'),
+    footerBackend: document.getElementById('footer-backend'),
+    footerPrivacy: document.getElementById('footer-privacy'),
     waveform: document.getElementById('waveform'),
     transcript: document.getElementById('transcript'),
     emptyState: document.getElementById('empty-state'),
@@ -89,6 +92,39 @@
       return (localStorage.getItem(HOTWORDS_KEY) || '').slice(0, 200);
     } catch {
       return ''; // private mode / storage disabled: the field still works
+    }
+  }
+
+  // "Never set" and "deliberately emptied" are different states: the first
+  // should take the server's starter glossary, the second must stay empty.
+  // Testing the value instead of the key meant a user who cleared the box had
+  // the default written back on every reload.
+  function hotwordsTouched() {
+    try {
+      return localStorage.getItem(HOTWORDS_KEY) !== null;
+    } catch {
+      return false;
+    }
+  }
+
+  // Which end of the wire does the recognition. Not cosmetic: with a remote
+  // backend the audio does leave the machine, and this page has been claiming
+  // the opposite in three places.
+  function applyBackendNote(config) {
+    const remote = Boolean(config) && config.asr_backend === 'remote';
+    const label = (config && config.asr_remote_model) || '远程服务';
+    if (el.localNoteText) {
+      el.localNoteText.textContent = remote
+        ? `识别调用远程 ${label}，音频会发送给该服务`
+        : '录音与识别均在本机完成，不上传云端，音频只留在本机浏览器存储里';
+    }
+    if (el.footerBackend) {
+      el.footerBackend.textContent = remote ? ` · 远程推理 ${label}` : ' · 本地推理';
+    }
+    if (el.footerPrivacy) {
+      el.footerPrivacy.textContent = remote
+        ? '录音音频保存在本机浏览器存储；识别时音频片段会发送到远程服务，文本只留在当前页面内存'
+        : '录音音频保存在本机浏览器存储，转写文本只在当前页面内存里，关闭页面后文本会丢失';
     }
   }
 
@@ -760,14 +796,15 @@
       el.footerModel.textContent = state.modelName;
 
       // The server ships a starter glossary (the app's own vocabulary). Use it
-      // until the user types their own, so a first run does not look like it
-      // has a broken glossary field.
-      if (el.hotwordsInput && !state.hotwords && config.hotwords) {
+      // only when the user has never touched the field — a cleared box must
+      // stay cleared, or the default comes back on every reload.
+      if (el.hotwordsInput && !hotwordsTouched() && config.hotwords) {
         state.hotwords = String(config.hotwords);
         el.hotwordsInput.value = state.hotwords;
       }
       setOfflineBadge(config.offline_ready);
       if (el.versionTag && config.version) el.versionTag.textContent = `v${config.version}`;
+      applyBackendNote(config);
 
       state.languages = config.languages || [];
       el.language.textContent = '';

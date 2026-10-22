@@ -1273,6 +1273,64 @@
   }
 
   /**
+   * Server `error` messages.
+   *
+   * These used to reach `handleMessage` and throw a ReferenceError, so a
+   * model that was not ready — or a page built against another protocol —
+   * failed with no visible explanation at all. Every known code gets wording
+   * that says what the user can do; an unknown one falls back to the server's
+   * own message rather than swallowing it.
+   */
+  function onServerError(message) {
+    const code = String(message.code || '');
+    const retryable = !!message.retryable;
+    let text;
+
+    switch (code) {
+      case 'model_not_ready':
+        text = '模型还没准备好，稍等几秒再试';
+        break;
+      case 'busy':
+        text = retryable ? '已有会话在进行中，请稍后重试' : '已有会话在进行中';
+        break;
+      case 'frame_too_large':
+        text = '音频帧异常，已停止接收';
+        break;
+      case 'unsupported_protocol':
+        // Reloading cannot help here: the page and the server ship together
+        // and the protocol constant is compiled into this file.
+        text = '前后端版本不一致，请重启应用';
+        break;
+      default:
+        text = String(message.message || '服务端出错了');
+        break;
+    }
+
+    showError(text, { retry: retryable });
+    announce(text);
+  }
+
+  /**
+   * Server `warning` messages: the pipeline degraded, nothing is broken.
+   * Unknown codes stay silent — warnings are the one message type that is
+   * allowed to grow without the client knowing about it.
+   */
+  function onServerWarning(message) {
+    switch (String(message.code || '')) {
+      case 'audio_backlog_dropped': {
+        const dropped = Math.max(0, Math.round(Number(message.dropped_ms) || 0));
+        showNotice(`网络拥塞，已跳过约 ${dropped} 毫秒音频`);
+        break;
+      }
+      case 'refine_backlog_dropped':
+        showNotice('精修落后，部分句子保留实时文本');
+        break;
+      default:
+        break;
+    }
+  }
+
+  /**
    * One badge slot per row: "精修中" while the accurate pass runs, "已精修"
    * once it lands and changed the text, nothing otherwise.
    */

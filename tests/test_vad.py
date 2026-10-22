@@ -164,3 +164,60 @@ def test_finalize_reports_finished_at():
     assert isinstance(event, dict)
     assert "finished_at" in event
     assert isinstance(event["finished_at"], float)
+
+
+# ------------------------------------------------------------------- span
+# The invariant the exported SRT leans on: the samples handed back are the
+# span [start, end). If the preroll moved the audio but not the timestamp,
+# the subtitle would land 300 ms late — and no other assertion catches it.
+
+SAMPLE_RATE = 16000
+TAIL_FRAMES = int(0.15 * 1000 / 30)  # the 150 ms of trailing context
+
+
+def _span_samples(event: dict) -> int:
+    return round((event["end"] - event["start"]) * SAMPLE_RATE)
+
+
+def test_audio_length_matches_reported_span():
+    """A flushed segment ends at its last voiced frame: samples == span."""
+    for preroll_ms in (300, 0):
+        segmenter = Segmenter(preroll_ms=preroll_ms)
+        feed(segmenter, np.concatenate([silence(0.5), speech(1.0)]))
+
+        event = segmenter.flush()
+        assert event is not None
+        assert abs(len(event["audio"]) - _span_samples(event)) <= 1
+
+
+def test_audio_length_matches_reported_span_across_utterances():
+    segmenter = Segmenter(preroll_ms=300)
+    for gap_s in (0.5, 0.3):
+        feed(segmenter, np.concatenate([silence(gap_s), speech(1.0)]))
+
+        event = segmenter.flush()
+        assert event is not None
+        assert abs(len(event["audio"]) - _span_samples(event)) <= 1
+
+
+def test_hangover_final_audio_starts_at_its_reported_start():
+    """Hangover finalization ends in silence, so the audio runs past `end`.
+
+    The surplus must be exactly the 150 ms tail — never the preroll on top of
+    it. ``keep`` is computed from ``segment_start_frame``, so a start that
+    failed to roll back would silently *truncate the head* instead: the two
+    preroll settings must therefore differ by exactly the preroll frames.
+    """
+    lengths = {}
+    for preroll_ms in (300, 0):
+        segmenter = Segmenter(preroll_ms=preroll_ms)
+        events = feed(
+            segmenter, np.concatenate([silence(0.5), speech(1.0), silence(1.2)])
+        )
+
+        assert len(events) == 1
+        surplus = len(events[0]["audio"]) - _span_samples(events[0])
+        assert surplus == TAIL_FRAMES * (SAMPLE_RATE * 30 // 1000)
+        lengths[preroll_ms] = len(events[0]["audio"])
+
+    assert lengths[300] - lengths[0] == 10 * (SAMPLE_RATE * 30 // 1000)

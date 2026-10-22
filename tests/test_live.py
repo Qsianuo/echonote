@@ -69,11 +69,20 @@ def test_apply_ignores_out_of_order_results():
     assert stream.text == "第一版"
 
 
-def test_covers_end_uses_a_tolerance():
+def test_covers_end_uses_a_small_float_tolerance():
+    """The tolerance is a float-equality buffer, not a policy.
+
+    The old 0.25 s window let ``finish`` treat a decode that stopped *before*
+    the final syllable as "already covered", so the tail of the sentence was
+    never re-decoded and went missing from the transcript.
+    """
     stream = UtteranceStream()
     stream.feed(speech(2.0))
     stream.apply("你好", 2.0)
-    assert stream.covers_end(2.1) is True
+    # 2.0 vs 2.05: covered (float tolerance). 2.0 vs 2.1: not covered — the
+    # decode must be run again so the tail syllable is not lost.
+    assert stream.covers_end(2.03) is True
+    assert stream.covers_end(2.1) is False
     assert stream.covers_end(2.6) is False
 
 

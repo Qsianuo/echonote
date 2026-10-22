@@ -140,8 +140,14 @@ class UtteranceStream:
         self._text = cleaned
         return True
 
-    def covers_end(self, end_s: float, tolerance_s: float = 0.25) -> bool:
-        """True when the last decode already heard the end of the utterance."""
+    def covers_end(self, end_s: float, tolerance_s: float = 0.05) -> bool:
+        """True when the last decode already heard the end of the utterance.
+
+        Tolerance is a float-equality buffer, not a policy: a larger one (the
+        old 0.25 s) made ``finish`` treat a decode that stopped *before* the
+        final syllable as "already covered", so the tail of the sentence was
+        never re-decoded and went missing from the transcript.
+        """
         return self._covered_s >= end_s - tolerance_s
 
     def reset(self) -> None:

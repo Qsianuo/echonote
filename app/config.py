@@ -178,6 +178,16 @@ VAD_MAX_SEGMENT_S = _env_float("ECHONOTE_VAD_MAX_SEGMENT_S", 30)
 # from just before the trigger and prepend it to the utterance instead.
 VAD_PREROLL_MS = _env_int("ECHONOTE_VAD_PREROLL_MS", 300)
 
+# How much trailing audio to keep when a segment is closed. The old hard-coded
+# 150 ms was tuned for long-form speech with clean pauses; spoken Chinese ends
+# with a falling tone and a soft coda ("呢", "啊", trailing nasal) that often
+# runs 200-400 ms *below* the VAD gate. A 150 ms tail cut those syllables off,
+# which is what left single-character rows ("文") hanging at the end of a
+# sentence. 400 ms covers the natural decay without dragging in real silence:
+# anything still lower than the gate by a wide margin is trimmed anyway (see
+# ``Segmenter._finalize``).
+VAD_TAIL_KEEP_MS = _env_int("ECHONOTE_VAD_TAIL_KEEP_MS", 400)
+
 # A final whose text equals the previous one, on a segment *shorter* than
 # this, is one hallucination blip rather than two sentences. Measured in the
 # field: room noise split into ~1 s segments, each decoding to "转写。" on

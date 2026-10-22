@@ -127,7 +127,7 @@ class LiveCaptioner:
             # still cover the end of the utterance: if it was scheduled before
             # the last words, waiting is dead time and the tail decode below
             # has to run anyway (measured: that wait alone added 1.6 s).
-            if self._inflight_covered >= end_s - 0.25:
+            if self._inflight_covered >= end_s - 0.05:
                 deadline = time.monotonic() + self.FINISH_WAIT_S
                 while self._inflight and time.monotonic() < deadline:
                     self._cond.wait(0.02)

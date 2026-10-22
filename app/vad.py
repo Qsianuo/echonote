@@ -167,13 +167,33 @@ class Segmenter:
             self._reset_segment()
             return None
 
-        # Keep a little tail after the last voiced frame, drop the rest.
-        keep = self.last_speech_frame - self.segment_start_frame + 1
-        tail = int(0.15 * 1000 / FRAME_MS)  # 150 ms of trailing audio
-        keep = min(len(self.frames), keep + tail)
+        # Trailing audio belongs to the utterance. The old cut kept only
+        # ``last_speech_frame + 150 ms`` and threw the rest away, which is what
+        # clipped the soft coda of a spoken Chinese sentence ("呢", "啊",
+        # trailing nasal) and left single-character rows ("文") hanging at the
+        # end. The tail is kept unless it is clearly just silence: a tail whose
+        # RMS is far below the gate carries no speech and would only drag the
+        # decode out, so it is still trimmed back to the safe window.
+        keep = len(self.frames)
+        tail_frames = max(1, int(config.VAD_TAIL_KEEP_MS / FRAME_MS))
+        if keep > tail_frames:
+            tail_audio = np.concatenate(self.frames[-tail_frames:])
+            tail_rms = float(np.sqrt(np.mean(np.square(tail_audio), dtype=np.float64)))
+            if tail_rms < self.base_threshold * 0.3:
+                # Pure silence past the last voiced frame: trim back to the
+                # configured tail window, never further.
+                keep = min(
+                    keep,
+                    (self.last_speech_frame - self.segment_start_frame + 1) + tail_frames,
+                )
         audio = np.concatenate(self.frames[:keep]) if keep else None
 
         start = self.segment_start_frame * FRAME_MS / 1000.0
+        # ``end`` is the last *voiced* frame, as before: SRT cues and the
+        # "did the sentence end here" check both want the moment the user
+        # stopped making sound, not the moment the buffer was handed over.
+        # The audio buffer is deliberately allowed to run a little past it —
+        # that extra is the soft coda we now keep, not a timestamp bug.
         end = (self.last_speech_frame + 1) * FRAME_MS / 1000.0
         # Snapshot before _reset_segment() clears them.
         speech_frames = self.speech_frames

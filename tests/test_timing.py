@@ -1,9 +1,10 @@
 """RG-09 (latency): every turn reports where its milliseconds went.
 
 The point of this module is that "did the optimization help?" becomes a
-number in a log line instead of an opinion, so the tests pin the two things
-that make the number trustworthy: the origin of the clock (the moment speech
-ended) and the shape of the wire payload (absent, never null).
+number in a log line instead of an opinion, so the tests pin the three things
+that make the number trustworthy: which origin each segment is measured from,
+that an unmeasured segment is absent rather than null, and that a nonsensical
+number is reported instead of being flattened.
 """
 
 from __future__ import annotations
@@ -22,28 +23,36 @@ from conftest import FRAME, speech
 
 
 def test_marks_are_relative_to_speech_finished():
-    t = TurnTiming(speech_finished_at=100.0)
+    t = TurnTiming(speech_started_at=97.0, speech_finished_at=100.0)
     t.mark("vad_done", 100.9)
-    t.mark("first_text", 102.14)
+    t.mark("final_text", 102.14)
     assert t.since("vad_done") == pytest.approx(900.0)
-    assert t.since("first_text") == pytest.approx(2140.0)
+    assert t.since("final_text") == pytest.approx(2140.0)
+
+
+def test_marks_are_also_relative_to_speech_started():
+    t = TurnTiming(speech_started_at=97.0, speech_finished_at=100.0)
+    t.mark("first_text", 98.5)
+    assert t.since_start("first_text") == pytest.approx(1500.0)
+    assert t.since("first_text") == pytest.approx(-1500.0)
 
 
 def test_missing_mark_returns_none():
-    t = TurnTiming(speech_finished_at=100.0)
+    t = TurnTiming(speech_started_at=97.0, speech_finished_at=100.0)
     assert t.since("never_happened") is None
+    assert t.since_start("never_happened") is None
 
 
 def test_payload_omits_unmeasured_segments():
-    t = TurnTiming(speech_finished_at=100.0)
+    t = TurnTiming(speech_started_at=99.0, speech_finished_at=100.0)
     t.mark("first_text", 102.0)
     p = t.payload(turn_id="1-1", epoch=1)
-    assert p["segments"] == {"to_first_text_ms": 2000.0}
+    assert p["segments"] == {"to_first_text_ms": 3000.0}
     assert "to_final_text_ms" not in p["segments"]
 
 
 def test_payload_maps_every_measured_mark_to_its_key():
-    t = TurnTiming(speech_finished_at=100.0)
+    t = TurnTiming(speech_started_at=99.0, speech_finished_at=100.0)
     t.mark("vad_done", 100.0)
     t.mark("first_text", 100.214)
     t.mark("final_text", 102.9801)
@@ -57,7 +66,9 @@ def test_payload_maps_every_measured_mark_to_its_key():
         # One decimal place: sub-100 µs is noise, and the log line has to
         # stay readable without a formatting step at every call site.
         "segments": {
-            "to_first_text_ms": 214.0,
+            # From the start of speech: the caption appeared 1.214 s in.
+            "to_first_text_ms": 1214.0,
+            # From the end of speech: this is what the user waits for.
             "to_final_text_ms": 2980.1,
             "to_refined_ms": 4500.0,
         },
@@ -67,33 +78,47 @@ def test_payload_maps_every_measured_mark_to_its_key():
 
 
 def test_payload_never_uses_null_for_a_missing_mark():
-    t = TurnTiming(speech_finished_at=100.0)
+    t = TurnTiming(speech_started_at=99.0, speech_finished_at=100.0)
     p = t.payload(turn_id="1-1", epoch=1)
     assert p["segments"] == {}
     assert None not in p["segments"].values()
 
 
-def test_a_caption_that_beats_the_pause_is_reported_as_zero():
-    """``first_text`` is stamped while the user is still talking.
+def test_the_first_caption_is_measured_from_the_start_of_speech():
+    """The live caption appears *during* the utterance.
 
-    The origin is the *end* of speech, so a live caption that was already on
-    screen when the pause was detected lands before the origin. The wire
-    contract forbids negative delays (``protocol.validate``), and a negative
-    "delay" is not a thing the product can act on, so the payload floors it at
-    zero — "already there when you stopped". ``since`` keeps the honest sign
-    for anyone measuring onset latency.
+    Measuring it from the pause would report a negative delay and, once
+    floored to zero, a metric that is always exactly 0 ms — the bug this test
+    exists to prevent. It must be a positive time from the start of speech.
     """
-    t = TurnTiming(speech_finished_at=100.0)
-    t.mark("first_text", 98.8)
-    assert t.since("first_text") == pytest.approx(-1200.0)
-    assert t.payload(turn_id="1-1", epoch=1)["segments"] == {"to_first_text_ms": 0.0}
+    t = TurnTiming(speech_started_at=98.0, speech_finished_at=100.0)
+    t.mark("first_text", 99.0)  # a full second before the pause
+    first = t.payload(turn_id="1-1", epoch=1)["segments"]["to_first_text_ms"]
+    assert first == pytest.approx((99.0 - 98.0) * 1000.0)
+    assert first > 0
+
+
+def test_a_final_that_predates_the_pause_is_not_flattened_to_zero():
+    """``final_text`` is measured from the end of speech, so a negative there
+    is a wiring bug.
+
+    Clamping it would turn a regression into a perfect 0 ms score, so the value
+    is passed through and ``protocol.validate`` rejects it loudly instead.
+    """
+    t = TurnTiming(speech_started_at=98.0, speech_finished_at=100.0)
+    t.mark("final_text", 99.5)
+    assert t.since("final_text") == pytest.approx(-500.0)
+    payload = t.payload(turn_id="1-1", epoch=1)
+    assert payload["segments"]["to_final_text_ms"] == -500.0
+    with pytest.raises(protocol.ProtocolError):
+        protocol.validate(payload)
 
 
 def test_mark_defaults_to_the_monotonic_clock():
-    t = TurnTiming(speech_finished_at=time.perf_counter())
+    t = TurnTiming(speech_started_at=time.perf_counter() - 1.0, speech_finished_at=time.perf_counter())
     t.mark("final_text")
     delta = t.since("final_text")
-    assert delta is not None and 0.0 <= delta < 1000.0
+    assert delta is not None and -1000.0 < delta < 1000.0
 
 
 # --------------------------------------------------------------------------
@@ -173,9 +198,9 @@ def test_a_turn_reports_once_per_visible_milestone(client, monkeypatch, caplog):
         }
         assert all(v >= 0 for v in message["segments"].values())
 
-    # A partial is on screen, so the first-caption mark exists; the refine has
-    # landed by the second message, so its mark does too.
-    assert "to_first_text_ms" in timings[0]["segments"]
+    # A partial is on screen, so the first-caption mark exists — and it is
+    # measured from the start of speech, so it is a real, positive latency.
+    assert timings[0]["segments"]["to_first_text_ms"] > 0
     assert "to_final_text_ms" in timings[0]["segments"]
     assert "to_refined_ms" not in timings[0]["segments"]
     # Same turn, later clock: the refine cannot precede the final.
@@ -187,4 +212,3 @@ def test_a_turn_reports_once_per_visible_milestone(client, monkeypatch, caplog):
     assert len(lines) == 2
     logged = json.loads(lines[1].split(" ", 1)[1])
     assert logged == timings[1]
-

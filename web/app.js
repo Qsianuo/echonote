@@ -4,7 +4,7 @@
 
   const SAMPLE_RATE = 16000;
   const MERGE_SAMPLES = 1600; // 100 ms upstream frame (PRD D-06 / FR-038)
-  const PROTOCOL_VERSION = '3';
+  const PROTOCOL_VERSION = '4';
   const RECONNECT_BASE_MS = 1500;
   const RECONNECT_MAX_MS = 15000;
   const RECONNECT_ATTEMPTS_CAP = 4;
@@ -636,7 +636,9 @@
 
   function applyStatus(message) {
     if (message.protocol && message.protocol !== PROTOCOL_VERSION) {
-      showError('页面与服务端版本不一致，请刷新页面。');
+      // Reloading alone does not fix this: the page and the server ship
+      // together, so a mismatch means one of them is stale.
+      showError('页面与服务端版本不一致，请重启应用后刷新页面。');
       return;
     }
 

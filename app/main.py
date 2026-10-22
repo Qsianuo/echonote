@@ -263,9 +263,13 @@ class StreamingSession:
 
         # Latency instrumentation. ``_first_text_at`` is stamped by the
         # caption thread while the user is still talking, i.e. before the
-        # turn's TurnTiming exists; ``_timings`` holds the marks of turns
-        # whose refinement has not landed yet, keyed by ``final.id``.
+        # turn's TurnTiming exists; ``_turn_started_at`` is the other end of
+        # that measurement (the first live caption is reported from the start
+        # of speech, since it appears before the pause); ``_timings`` holds the
+        # marks of turns whose refinement has not landed yet, keyed by
+        # ``final.id``.
         self._first_text_at: float | None = None
+        self._turn_started_at: float | None = None
         self._timings: dict[str, TurnTiming] = {}
 
         self._live: LiveCaptioner | None = None
@@ -446,6 +450,11 @@ class StreamingSession:
                         seed = segmenter.current_audio()
                         if seed is not None:
                             self._live.begin(seed, segmenter.segment_start_s)
+                            # Origin for ``to_first_text_ms``: this is the
+                            # moment the utterance became capturable. Taken
+                            # here rather than in the segmenter so ``vad.py``
+                            # stays free of wall-clock reads.
+                            self._turn_started_at = time.perf_counter()
                             in_utterance = True
                 self._speaking = bool(segmenter.in_speech)
 
@@ -470,11 +479,17 @@ class StreamingSession:
         """Turn one finished utterance into a ``final`` (+ a refinement)."""
         audio = event["audio"]
         start, end = event["start"], event["end"]
-        # Mark 1/4: the clock starts when the VAD closed the utterance, which
-        # is the instant the user starts feeling like they are waiting.
-        # ``finished_at`` is a perf_counter reading (Task 7) — monotonic, so it
-        # is only ever subtracted, never rendered as a time of day.
-        turn = TurnTiming(event["finished_at"])
+        # The two origins of the measurement. ``finished_at`` is a
+        # perf_counter reading taken when the VAD closed the utterance (the
+        # instant the user starts feeling like they are waiting); the start is
+        # the one recorded when the live captioner picked the utterance up and
+        # falls back to the timeline the segmenter reported when no captioner
+        # ran (live captions disabled, or a segment that began before it was
+        # seeded). Consumed here so the next turn cannot inherit it.
+        started_at, self._turn_started_at = self._turn_started_at, None
+        if started_at is None:
+            started_at = event["finished_at"] - (end - start)
+        turn = TurnTiming(started_at, event["finished_at"])
         turn.mark("vad_done")
         # Mark 2/4: the first partial was stamped on the caption thread, before
         # this object existed. Consuming it clears the flag for the next turn —

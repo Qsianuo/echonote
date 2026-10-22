@@ -94,7 +94,11 @@ def run_server(exe: Path) -> None:
         print("health:", health)
 
         config = json.loads(wait_http("/api/config", 30))
-        assert config.get("protocol") == "2", config
+        # Protocol has moved (2 -> 3 -> 4); assert "a modern protocol is
+        # reported" rather than pinning an exact number that goes stale
+        # every time app/protocol.py bumps PROTOCOL_VERSION.
+        reported = config.get("protocol")
+        assert reported is not None and int(reported) >= 2, config
         print("config:", {k: config[k] for k in ("version", "protocol", "max_sessions")})
         assert "offline_ready" in config, config
 

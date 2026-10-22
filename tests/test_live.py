@@ -61,6 +61,36 @@ def test_apply_rejects_a_hypothesis_that_loses_half_the_sentence():
     assert stream.text == "这是回声笔记的实时语音识别测试"
 
 
+def test_apply_keeps_the_tail_when_a_decode_stops_short():
+    """A hypothesis that is the old text minus 1-3 trailing chars is rejected.
+
+    Measured failure: the shrink guard (55%) only catches a fragment, so a
+    decode that quietly dropped the last 1, 2 or 3 characters was accepted and
+    the tail of the sentence disappeared. The old text is strictly better in
+    that case and must be kept.
+    """
+    full = "这是回声笔记的实时语音识别测试"
+    stream = UtteranceStream()
+    stream.feed(speech(3.0))
+    assert stream.apply(full, 3.0) is True
+    for cut in (1, 2, 3):
+        stream.feed(speech(1.0))
+        shorter = full[:-cut]
+        assert stream.apply(shorter, 4.0 + cut) is False
+        assert stream.text == full, f"tail of {cut} char(s) must survive"
+
+
+def test_apply_still_accepts_a_real_correction_of_the_tail():
+    """A tail that genuinely changed (not just truncated) is still accepted."""
+    stream = UtteranceStream()
+    stream.feed(speech(3.0))
+    assert stream.apply("今天天气很好适合出门", 3.0) is True
+    stream.feed(speech(1.0))
+    # Same length, different tail: a real correction, not a truncation.
+    assert stream.apply("今天天气很好适合出错", 4.0) is True
+    assert stream.text == "今天天气很好适合出错"
+
+
 def test_apply_ignores_out_of_order_results():
     stream = UtteranceStream()
     stream.feed(speech(3.0))

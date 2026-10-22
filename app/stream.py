@@ -134,6 +134,15 @@ class UtteranceStream:
             if grew > 0 and len(cleaned) < len(self._text) * _SHRINK_GUARD:
                 self._rejected += 1
                 return False
+            # The shrink guard above only catches a hypothesis that lost most
+            # of the sentence; a decode that simply stopped 1-3 characters
+            # early (soft coda, truncated buffer) used to slip through and the
+            # tail characters disappeared from the caption and the final.
+            # When the new text is exactly the old text minus a trailing run,
+            # the old one is strictly better: keep it and keep the tail.
+            if grew > 0 and self._text.startswith(cleaned) and len(cleaned) < len(self._text):
+                self._rejected += 1
+                return False
         self._covered_s = max(self._covered_s, covered_s)
         if cleaned == self._text:
             return False

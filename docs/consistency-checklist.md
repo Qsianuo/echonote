@@ -38,7 +38,7 @@ grep -rn "3\.9+" README.md start.bat run.sh app/     # 必须为空
 | 17 | 旧堆内音频数组已彻底移除 | `grep -rn "audioChunks" web/` | 空 | ✅ 空（v0.12 改 `AudioStore`：OPFS 落盘 / 内存降级，`app.js` 只剩一个字节计数器） |
 | 18 | VAD 预滚已文档化 | `grep -n "ECHONOTE_VAD_PREROLL_MS" README.md` | 命中 | ✅ 实测命中 1 处（配置表，默认 `300`，写明按 30 ms 取整为 10 帧、时间轴最多前移 300 ms） |
 | 19 | `timing` 消息已文档化 | `grep -n '"type":"timing"' README.md` | 命中 | ✅ 实测命中 1 处（协议段示例 `{"type":"timing","epoch":1,"turn_id":"1-1","speech_finished_at":12345.68,"segments":{"to_first_text_ms":2140.5}}`，另有文字说明 v4 新增该消息） |
-| 20 | 不再宣称「不写入磁盘」 | `grep -rn "不写入磁盘" README.md web/` | 空 | ✅ 空（v0.12 音频确实落 OPFS；README 改为「文本只在页面内存、分片落 OPFS」，页脚与状态条同步区分音频/文本） |
+| 20 | 音频不宣称「不写入磁盘」 | `grep -rn "\(录音\|音频\|语音\).\{0,10\}不写入磁盘" README.md web/` | 空 | ✅ 空。模式已收窄：只拦音频/录音/语音附近的失实声明，不再误伤「转写**文本**不写入磁盘」这类正确表述（判别力实测：旧句 `录音与转写不写入磁盘…` 命中，正句 `转写文本不写入磁盘，录音分片落在 OPFS` 不命中） |
 
 ## 2. 代码侧一致性（与文案对齐的实现点）
 

@@ -173,6 +173,11 @@ VAD_THRESHOLD = _env_float("ECHONOTE_VAD_THRESHOLD", 0.010)
 VAD_HANGOVER_MS = _env_int("ECHONOTE_VAD_HANGOVER_MS", 900)
 VAD_MIN_SPEECH_MS = _env_int("ECHONOTE_VAD_MIN_SPEECH_MS", 240)
 VAD_MAX_SEGMENT_S = _env_float("ECHONOTE_VAD_MAX_SEGMENT_S", 30)
+# A segment is only confirmed after VAD_MIN_SPEECH_MS of voice, and the audio
+# before that confirmation used to be thrown away — which clipped quiet onsets
+# (soft vowels, unvoiced consonants) by up to ~240 ms. Keep this much audio
+# from just before the trigger and prepend it to the utterance instead.
+VAD_PREROLL_MS = _env_int("ECHONOTE_VAD_PREROLL_MS", 300)
 
 # A final whose text equals the previous one, on a segment *shorter* than
 # this, is one hallucination blip rather than two sentences. Measured in the

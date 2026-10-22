@@ -7,6 +7,9 @@ noise floor and ends after a short period of silence.
 
 from __future__ import annotations
 
+import time
+from collections import deque
+
 import numpy as np
 
 from . import config
@@ -22,6 +25,7 @@ class Segmenter:
         hangover_ms: int = config.VAD_HANGOVER_MS,
         min_speech_ms: int = config.VAD_MIN_SPEECH_MS,
         max_segment_s: float = config.VAD_MAX_SEGMENT_S,
+        preroll_ms: int = config.VAD_PREROLL_MS,
     ) -> None:
         self.sample_rate = sample_rate
         self.frame_size = int(sample_rate * FRAME_MS / 1000)
@@ -31,6 +35,12 @@ class Segmenter:
         # 280 ms / 30 ms -> 9 frames = 270 ms effective
         self.min_speech_frames = max(1, int(min_speech_ms / FRAME_MS))
         self.max_segment_frames = max(1, int(max_segment_s * 1000 / FRAME_MS))
+        # Speech is only confirmed after min_speech_ms of voice, and the frames
+        # before that point used to be discarded — quiet onsets (soft vowels,
+        # unvoiced consonants) lost their first tenths of a second. Keep the
+        # most recent non-speech frames so they can be glued back on.
+        self.preroll_frames = max(0, preroll_ms // FRAME_MS)
+        self._ring: deque[np.ndarray] = deque(maxlen=max(1, self.preroll_frames))
 
         self._pending = np.empty(0, dtype=np.float32)
         self.total_frames = 0  # number of frames consumed since session start
@@ -108,6 +118,14 @@ class Segmenter:
                 self.speech_frames = 0
                 self.silence_run = 0
                 self.segment_start_frame = self.total_frames
+                n_pre = len(self._ring)
+                if n_pre:
+                    # The preroll frames become the head of the utterance, so
+                    # the timestamp has to move back with them: without this
+                    # the audio and the exported SRT drift apart by 300 ms.
+                    self.frames = list(self._ring)
+                    self.segment_start_frame = max(0, self.segment_start_frame - n_pre)
+                self._ring.clear()
             self.silence_run = 0
             self.speech_frames += 1
             self.frames.append(frame.copy())
@@ -120,6 +138,10 @@ class Segmenter:
             self.silence_run += 1
             if self.silence_run >= self.hangover_frames:
                 event = self._finalize()
+        elif self.preroll_frames > 0:
+            # Not speaking yet: hold the last preroll_frames frames in case
+            # speech starts with a quiet onset.
+            self._ring.append(frame.copy())
 
         self.total_frames += 1
         return event
@@ -143,7 +165,13 @@ class Segmenter:
 
         if not speech_ok or audio is None or len(audio) < self.sample_rate * 0.25:
             return None
-        return {"type": "final", "audio": audio, "start": start, "end": end}
+        return {
+            "type": "final",
+            "audio": audio,
+            "start": start,
+            "end": end,
+            "finished_at": time.perf_counter(),
+        }
 
     def _reset_segment(self) -> None:
         self.in_speech = False

@@ -8,7 +8,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![Whisper](https://img.shields.io/badge/faster--whisper-local%20STT-412991?style=flat-square&logo=openai&logoColor=white)](https://github.com/SYSTRAN/faster-whisper)
 [![License](https://img.shields.io/badge/License-MIT-64ffda?style=flat-square)](LICENSE)
-[![Stage](https://img.shields.io/badge/stage-v0.11.1%20tech%20preview-f0b429?style=flat-square)](#-延迟口径重要)
+[![Stage](https://img.shields.io/badge/stage-v0.12.0%20tech%20preview-f0b429?style=flat-square)](#-延迟口径重要)
 
 边说边出字 · 录音不上传 · 装好模型后完全离线 · 支持中英日韩等多语言
 
@@ -16,7 +16,7 @@
 
 ---
 
-> **这是 v0.11.0 技术预览（tech preview），不是 v1.0.0。**
+> **这是 v0.12.0 技术预览（tech preview），不是 v1.0.0。**
 > 三件事需要先说清楚：**实验性**；**延迟取决于硬件**（本机实测首字 2.8 s、停顿后 1 s 出定稿、约 12 s 完成精修，见下文口径）；**首次准备要下载两个模型**（145 MB + 1.5 GB），之后可完全断网运行。
 
 ---
@@ -30,6 +30,9 @@
 - 🔌 **真正离线** —— 模型在磁盘上时，识别全程零联网；`--offline` 还能强制断网启动
 - 🌍 **多语言** —— 中文 / 英文 / 日文 / 韩文 / 法文 / 德文 / 西班牙文 / 俄文，可自动识别
 - 📝 **四种导出** —— TXT 文本、Markdown 笔记、SRT 字幕、WAV 原始录音
+- 💾 **边录边落盘** —— 音频分片同步写入浏览器 OPFS，录音期间内存占用与时长无关；OPFS 不可用（隐私模式等）时自动降级为内存，界面一行提示
+- ▶️ **回放与字幕联动** —— 停止后可回放本次录音：30 秒窗口解码、点任意字幕跳转到该句并高亮，播放条激活时空格键控制播放（不再误触录音）
+- ⏱ **逐段延迟埋点** —— 每句从「说完」到「首字 / 定稿 / 精修」的毫秒数逐段上报，瓶颈在哪一段一看就知道
 - 🎨 **深色界面** —— 录音状态、实时波形、计时器、自动滚动字幕
 - ⌨️ **全键盘可用** —— 空格开始 / 停止，导出菜单支持方向键与 Esc
 - ♿ **读屏友好** —— 状态与字幕通过 live region 播报，错误使用 `role="alert"`
@@ -169,6 +172,7 @@ v0.11 换掉的就是这个结构：**VAD 只负责判断「有人在说话」�
 - **精修会让路**：只要还在说话、或有定稿在途，精修线程就不启动 —— 两个模型抢 4 个核，会把 0.9 s 的解码拖成 3.9 s。
 
 - 服务端把实测值放进状态：界面显示「实时字幕每次解码约 N 秒」，不用你自己算。
+- **逐段延迟可以自己量**：每句话说完之后，服务端会发一条 `timing` 消息（见协议段），带上到「首字 / 定稿 / 精修」各花了多少毫秒。上表的数字是本机一次实测，不是保证值——你的硬件、模型档位、句长都会改变它，`timing` 就是给这件事用的口径。
 - 「识别模型」下拉框可随时切换，切换只加载本地文件，**不会触发下载**。
 - A/B/C 档的 p95 门禁（首条 partial ≤2.0 s、final ≤3.0 s）**仍未达标**：首字 2.8 s 卡在「2 s 缓冲 + 1 次解码」的物理下限，要再快只能换更强的 CPU 或更小的模型。这是技术预览的原因之一。
 
@@ -209,6 +213,7 @@ python tools/fetch_model.py --list
 | `ECHONOTE_VAD_HANGOVER_MS` | `900` | 停顿多久算一句结束。按 30 ms 取整，**实际 900 ms** |
 | `ECHONOTE_VAD_MIN_SPEECH_MS` | `240` | 最短语音，按帧取整后**实际 240 ms**，更短的片段直接丢弃 |
 | `ECHONOTE_VAD_MAX_SEGMENT_S` | `30` | 单段最长时长，到点强制切分。切太短会丢上下文，反而更不准 |
+| `ECHONOTE_VAD_PREROLL_MS` | `300` | **预滚**：确认「有人在说话」之前的那段音频也送进解码，避免句首轻声、清辅音被切掉。按 30 ms 取整（300 → 10 帧）；代价是字幕时间轴最多前移 300 ms |
 | `ECHONOTE_BEAM_SIZE` | `5` | final 的 beam 宽度；`1` 更快但错字更多 |
 | `ECHONOTE_TEMP_FALLBACK` | 未设置 | 开启温度回退阶梯。**本机实测会把 30 s 音频截断到 1/3，默认关闭** |
 | `ECHONOTE_CONDITION_ON_PREVIOUS` | `1` | final 是否承接上一句上下文 |
@@ -219,6 +224,8 @@ python tools/fetch_model.py --list
 | `ECHONOTE_LIVE_STEP_S` | `0.6` | 实时解码的**下限节流**：至少来了这么多新音频才解一次，不是承诺值 |
 | `ECHONOTE_DISABLE_REFINE` | 未设置 | 设为 `1` 关闭定稿精修，字幕只保留实时档的结果（更快，但准确率降一档） |
 | `ECHONOTE_HOTWORDS` | 读 `models/hotwords.txt` | 专有名词表。优先级：环境变量 > `models/hotwords.txt` > 内置默认值 |
+| `ECHONOTE_TIMING_LOG` | 未设置 | 设为 `1` 把每轮的逐段延迟额外打成一行 `[TURN_TIMING]` 日志（`timing` 消息本身始终发送） |
+| `ECHONOTE_PEAK_NORMALIZE` | 未设置 | 峰值归一化，实验性，**默认关闭**。开启前请自行用同批样本对比 CER——**本项目未实测其 CER**，且可能把环境噪声一并抬起来，**不建议默认开启** |
 
 ### 专有名词表（`models/hotwords.txt`）
 
@@ -269,7 +276,7 @@ python tools/fetch_model.py --list
 | 服务端积压 | 最多缓存 60 s 音频，溢出时**丢最旧、保最新**并回 `warning`（不静默） |
 | 并发会话 | 单进程最多 2 个，第 3 个收到 `busy` |
 | 录音时长 | 默认软上限 90 分钟，72 分钟提示；到上限自动停止但保留全部文字与音频 |
-| 落盘 | **不写磁盘**（模型文件除外）。关闭或刷新页面即丢失，导出由你手动触发 |
+| 落盘 | 录音期间音频分片由浏览器同步写入自己的站点存储（OPFS），停止时把 `.pcm.tmp` 改名为 `.pcm`；服务端**不写磁盘**。强关标签页会残留 `.pcm.tmp`，下次启动**只提示、不删除、不改名**。当前版本没有历史列表，导出请在本次会话内完成 |
 
 ---
 
@@ -324,7 +331,7 @@ WebSocket ──▶ FastAPI（每连接一会话）
 
 - 音频只在本机的 `127.0.0.1` 与服务端通信，**不经过互联网**
 - 识别使用本地模型，**不需要 API Key**
-- 录音与转写**不写入磁盘**，也不使用 OPFS / IndexedDB / 临时文件（导出的文件由你自己保存）
+- 转写文本**不写入磁盘**；录音分片只落在浏览器自己的站点存储（OPFS）里，服务端不保存音频，也不使用 IndexedDB、不写临时文件（导出的文件由你自己保存）
 - 无遥测、无统计、无第三方请求（仅首次模型下载）
 - 日志不记录转写文本
 
@@ -338,16 +345,21 @@ echonote/
 │   ├── __main__.py    # python -m app（含监听地址安全检查）
 │   ├── desktop.py     # 便携版入口：横幅、自动开浏览器、--self-test
 │   ├── main.py        # FastAPI、WebSocket 会话、并发与队列上限
-│   ├── protocol.py    # 协议 v3 消息构造与校验
+│   ├── protocol.py    # 协议 v4 消息构造与校验
 │   ├── live.py        # 实时字幕线程：增长中的缓冲 + 最新快照解码
 │   ├── stream.py      # 一句话的音频缓冲、增长策略、防回缩保护
+│   ├── timing.py      # 逐段延迟埋点（说完 → 首字 / 定稿 / 精修）
 │   ├── stt.py         # faster-whisper 加载（可重试）与转写
-│   ├── vad.py         # 能量 VAD 自动断句
+│   ├── vad.py         # 能量 VAD 自动断句（含 300 ms 预滚）
 │   └── config.py      # 环境变量配置（含 frozen 路径解析）
 ├── web/
 │   ├── index.html     # 界面
 │   ├── style.css      # 深色主题
 │   ├── app.js         # 录音、时间轴、实时字幕、导出编排
+│   ├── audio-store.js # OPFS / 内存两套落盘实现（同接口，可测试）
+│   ├── storage-worker.js # OPFS 同步写盘 Worker
+│   ├── playback.js    # 回放：30 s 窗口解码与定段
+│   ├── waveform.js    # 波形：几何测量缓存 + 行索引
 │   ├── export.js      # TXT/MD/SRT 生成（纯函数，可测试）
 │   ├── wav.js         # WAV 编码（纯函数，可测试）
 │   └── pcm-worklet.js # 音频重采样 Worklet
@@ -369,7 +381,7 @@ echonote/
 
 ---
 
-## 🌐 HTTP 与 WebSocket 协议（v3）
+## 🌐 HTTP 与 WebSocket 协议（v4）
 
 ### HTTP
 
@@ -395,13 +407,16 @@ echonote/
 
 | 消息 | 说明 |
 |------|------|
-| `{"type":"status","protocol":"3","ready":true,...}` | 握手状态与变更推送；含 `live_model` / `live_separate` / `live_ms` |
+| `{"type":"status","protocol":"4","ready":true,...}` | 握手状态与变更推送；含 `live_model` / `live_separate` / `live_ms` |
 | `{"type":"partial","text":"...","epoch":1,"start":1.2}` | 实时字幕（会被覆盖） |
 | `{"type":"final","id":"1-1","epoch":1,"text":"...","start":1.2,"end":3.8,"stable":false}` | 一句的定稿。`stable:false` 表示定稿模型还会改写它 |
 | `{"type":"refine","id":"1-1","epoch":1,"text":"...","start":1.2,"end":3.8}` | 精修结果：**同 id** 替换文本，时间轴不动 |
+| `{"type":"timing","epoch":1,"turn_id":"1-1","speech_finished_at":12345.68,"segments":{"to_first_text_ms":2140.5}}` | **v4 新增**：逐段延迟埋点。每轮最多两条（定稿后一条，精修后再一条）。`speech_finished_at` 是 `perf_counter` 读数，只能在同一台机器上相减，不是日期；`segments` 只出现真的发生过的里程碑（`to_first_text_ms` / `to_final_text_ms` / `to_refined_ms`），没发生就不给键，避免把「没测到」读成 `0 ms` |
 | `{"type":"error","code":"busy","message":"...","retryable":true}` | 错误（`frame_too_large` / `busy` / `model_not_ready` / `unsupported_protocol`） |
 | `{"type":"warning","code":"audio_backlog_dropped","dropped_ms":320}` | 降级告警，不中断 |
 | `{"type":"done"}` | 会话结束 |
+
+> v4 相比 v3 只新增了 `timing` 消息（消息集变了，所以版本号仍要跳）：它是纯诊断信息，不认识它的客户端静默忽略即可，字幕、时间轴、导出都照旧。版本号存在于 `app/protocol.py` 的 `PROTOCOL_VERSION`，前端不一致时提示「请刷新页面」。
 
 ---
 

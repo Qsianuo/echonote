@@ -58,13 +58,12 @@ ROOT_DIR = _data_dir()
 #
 # The document version and the product version are intentionally separate:
 # PRD v1.1 describes the target product v1.0.0, while what can be shipped
-# today is the v0.9.0 tech preview. Every public surface (README, FastAPI
+# today is the v0.12.0 tech preview. Every public surface (README, FastAPI
 # version, screenshots) must agree with APP_VERSION, never with the document.
 # --------------------------------------------------------------------------
 
-APP_VERSION = "0.11.1"
+APP_VERSION = "0.12.0"
 APP_STAGE = "tech-preview"
-PROTOCOL_VERSION = "2"
 
 
 def _env_flag(name: str, default: bool = False) -> bool:

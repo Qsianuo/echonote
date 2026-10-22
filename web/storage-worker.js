@@ -10,9 +10,10 @@
  *
  * 主线程 → Worker：{id, type:'open', name} / {id, type:'append', buffer}
  *                  / {id, type:'finish'} / {id, type:'read', from, to}
- *                  / {type:'flush'}（无回复，beforeunload 尽力刷盘）
+ *                  / {id, type:'flush'}（尽力刷盘，失败不上报 error）
  * Worker → 主线程：{id, type:'opened', offset} / {type:'progress', offset}
  *                  / {id, type:'finished', offset} / {id, type:'data', buffer}
+ *                  / {id, type:'flushed', ok, error?}
  *                  / {id, type:'error', error}
  */
 'use strict';
@@ -43,7 +44,7 @@ async function run(message) {
         read(message);
         break;
       case 'flush':
-        if (handle) handle.flush();
+        flushSafely(message);
         break;
       default:
         break;
@@ -88,6 +89,29 @@ function append(message) {
   if (offset - reported >= PROGRESS_STEP_BYTES) {
     reported = offset;
     self.postMessage({ type: 'progress', offset });
+  }
+}
+
+/**
+ * flush 是 beforeunload 的尽力而为兜底：出错只回报 `flushed.ok = false`，
+ * 绝不走 run() 的 error 通道——主线程把"无主 error"当成致命写盘失败，
+ * 一次 flush 失败就会误判整段录音报废。
+ */
+function flushSafely(message) {
+  if (!handle) {
+    self.postMessage({ id: message.id, type: 'flushed', ok: false, error: '文件未打开' });
+    return;
+  }
+  try {
+    handle.flush();
+    self.postMessage({ id: message.id, type: 'flushed', ok: true });
+  } catch (error) {
+    self.postMessage({
+      id: message.id,
+      type: 'flushed',
+      ok: false,
+      error: (error && error.message) || String(error),
+    });
   }
 }
 

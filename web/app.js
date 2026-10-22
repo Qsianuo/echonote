@@ -201,6 +201,13 @@
         bytes = message.offset; // Worker 报的已落盘字节，比本地累加更可信
         return;
       }
+      if (message.type === 'flushed') {
+        // 尽力而为的刷盘：失败只告警，绝不进 failStorage（会关掉整个 Worker）。
+        if (!message.ok) {
+          console.warn('[echonote] 刷盘失败（已忽略，录音继续）：', message.error);
+        }
+        return;
+      }
       const waiting = pending.get(message.id);
       if (waiting) pending.delete(message.id);
       if (message.type === 'error') {
@@ -289,7 +296,9 @@
       /** 只 flush 不关闭：给 beforeunload 用（关句柄会让"取消离开"后的录音静默停写）。 */
       flush() {
         if (closed || failed) return;
-        worker.postMessage({ type: 'flush' });
+        const id = nextId;
+        nextId += 1;
+        worker.postMessage({ type: 'flush', id });
       },
 
       async read(from, to) {

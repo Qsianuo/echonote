@@ -179,8 +179,27 @@
           </div>
         </div>
 
+        <!-- 回放条：没有音频时按钮与进度条均禁用（不可点） -->
+        <div class="playbar" id="playbar">
+          <button id="play-toggle" class="play-toggle" type="button" disabled aria-label="播放录音">
+            播放
+          </button>
+          <input
+            id="play-seek"
+            class="play-seek"
+            type="range"
+            min="0"
+            max="0"
+            step="0.1"
+            value="0"
+            disabled
+            aria-label="播放进度"
+          />
+          <span id="play-time" class="play-time">00:00 / 00:00</span>
+        </div>
+
         <div class="panel-foot">
-          <span><kbd>空格</kbd> 开始 / 停止</span>
+          <span><kbd>空格</kbd> 开始 / 停止 · 播放条内 <kbd>空格</kbd> 播放 / 暂停</span>
           <span>模型 <b id="footer-model">small</b> · 本地推理</span>
         </div>
       </section>
@@ -214,6 +233,7 @@
     <script src="export.js"></script>
     <script src="wav.js"></script>
     <script src="audio-store.js"></script>
+    <script src="playback.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

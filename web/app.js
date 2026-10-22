@@ -13,10 +13,18 @@
   const MEMORY_BUDGET_BYTES = 200 * 1024 * 1024;
   const LOW_QUOTA_BYTES = 300 * 1024 * 1024;
   const STORAGE_WORKER_URL = 'storage-worker.js';
+  // 回放按窗口解码：一次只把 30 s 的 PCM 读进内存（≈0.96 MB Int16 + 1.9 MB
+  // Float32），60 min 录音也不会整段进堆。队列余量低于 5 s 就补下一块，
+  // 相当于提前 25 s 排好下一段，接缝由 PlaybackScheduler 贴着上一段结尾排。
+  const PLAY_WINDOW_S = 30;
+  const PLAY_PREFETCH_S = 5;
+  const PLAY_PUMP_MS = 500;
+  const PLAY_SEEK_STEP_S = 5;
 
   const Expo = window.EchoNoteExport;
   const Wav = window.EchoNoteWav;
   const Audio = window.EchoNoteAudioStore;
+  const Playback = window.EchoNotePlayback;
 
   const el = {
     recordBtn: document.getElementById('record-btn'),
@@ -56,6 +64,10 @@
     offlineBadge: document.getElementById('offline-badge'),
     offlineNote: document.getElementById('local-note-text'),
     speedNotice: document.getElementById('speed-notice'),
+    playbar: document.getElementById('playbar'),
+    playToggle: document.getElementById('play-toggle'),
+    playSeek: document.getElementById('play-seek'),
+    playTime: document.getElementById('play-time'),
   };
 
   const HOTWORDS_KEY = 'echonote.hotwords';
@@ -120,6 +132,23 @@
     backlogWarned: false,
     reduceMotion: false,
     dialogResolve: null,
+    // 回放：一个复用的 AudioContext（暂停用 suspend，绝不 close）、一个
+    // PlaybackScheduler 时间线、以及当前排在队列里的 BufferSource。
+    playCtx: null,
+    playSched: null,
+    playState: 'idle', // idle | playing | paused | seeking
+    playPos: 0, // 已排入队列的音频末端位置（秒）
+    playSources: [],
+    playLoad: null, // 在途的窗口读取（同一时刻只允许一笔）
+    playToken: 0, // 递增即可让在途读取作废（seek / stop）
+    playExhausted: false, // 已经读到文件末尾，等在播的尾巴放完
+    playTimerId: null,
+    playRafId: null,
+    playScrub: false,
+    playInteracted: false, // 最近一次指针交互发生在播放条内
+    playRowId: null, // 当前高亮的字幕行 id
+    playResume: false, // seek 收尾后是否继续播（供嵌套 seek 沿用）
+    playSeekId: 0, // 每次 seek 的代号，晚到的 await 一看到代号变了就退出
   };
 
   /* ─────────────────── audio storage (OPFS / memory) ───────────────────
@@ -788,6 +817,8 @@
   async function startRecording(options = {}) {
     const continueSession = !!options.continueSession;
     if (state.recording) return;
+    // 一边放一边录会把回放声录进麦克风；开录一律先停回放。
+    stopPlayback();
 
     if (!state.connected) {
       setHint('正在连接服务器…');
@@ -917,6 +948,8 @@
       startTimer();
       drawWaveform();
       updateRecordEnabled();
+      // 录音中回放不可用：让播放条跟着录音状态变灰（updateExportState 里同步）。
+      updateExportState();
       announce('开始录音');
     } catch (error) {
       console.error(error);
@@ -995,6 +1028,8 @@
   }
 
   async function resetSession() {
+    // 先把回放停掉：在途的 read 不能落在即将被 discard 的 store 上。
+    stopPlayback();
     const discarded = state.store;
     state.store = null;
     state.ledger = null;
@@ -1346,6 +1381,7 @@
     state.finalIds.clear();
     state.partial = '';
     state.lastPartialText = '';
+    state.playRowId = null; // 行都没了，高亮记账一起清掉
     el.finals.textContent = '';
     el.emptyState.hidden = false;
     renderPartial();
@@ -1406,6 +1442,8 @@
       const format = button.dataset.format;
       button.disabled = format === 'wav' ? !hasAudio : !hasText;
     });
+
+    syncPlaybar();
   }
 
   async function exportAs(format) {
@@ -1500,6 +1538,458 @@
     el.exportMenu.hidden = true;
     el.exportBtn.setAttribute('aria-expanded', 'false');
     if (returnFocus) el.exportBtn.focus();
+  }
+
+  /* ─────────────────────────── playback ───────────────────────────
+   * 回放只做三件事：把某个位置换算成一段字节、把这段字节排进 AudioContext 的
+   * 时间线、把时间线换算回进度条。解码永远是「按 30 s 窗口」的：整段录音从不
+   * 进内存（60 min ≈ 180 MB PCM → 峰值 ≈ 3 MB）。
+   *
+   * 状态机：idle →(播放)→ playing →(暂停)→ paused →(播放)→ playing
+   *        任意态 →(seek)→ seeking → playing / paused
+   *        playing →(队列放空且无更多数据)→ idle（进度条停在末尾）
+   */
+
+  /** 录音总时长（秒）。没有音频、没有存储实例或 playback.js 缺失时返回 0。 */
+  function playDurationS() {
+    if (!Playback || !state.store || !state.ledger) return 0;
+    return state.ledger.sampleCount / SAMPLE_RATE;
+  }
+
+  /** 整页只建一个 AudioContext：暂停用 suspend，重播用 resume（close 会带来冷启动爆音）。 */
+  function ensurePlayCtx() {
+    if (state.playCtx) return state.playCtx;
+    if (!Playback) return null;
+    const Ctor = window.AudioContext || window.webkitAudioContext;
+    if (!Ctor) return null;
+    state.playCtx = new Ctor();
+    state.playSched = Playback.PlaybackScheduler.create({ leadS: 0.02 });
+    return state.playCtx;
+  }
+
+  /** 当前播放头位置：已排入队列的末端位置减去队列里还没放完的时长。 */
+  function playPosition() {
+    const ctx = state.playCtx;
+    const sched = state.playSched;
+    const duration = playDurationS();
+    if (!ctx || !sched || duration <= 0) return 0;
+    const ahead = Math.max(0, sched.nextTime - ctx.currentTime);
+    return Math.max(0, Math.min(duration, state.playPos - ahead));
+  }
+
+  function renderPlayTime(seconds) {
+    const label = `${Expo.formatClock(seconds)} / ${Expo.formatClock(playDurationS())}`;
+    // 每帧都会走到这里：只在文字真的变了时才写 DOM。
+    if (el.playTime && el.playTime.textContent !== label) el.playTime.textContent = label;
+    if (el.playSeek) el.playSeek.setAttribute('aria-valuetext', Expo.formatClock(seconds));
+  }
+
+  function updatePlayUI() {
+    if (!el.playToggle) return;
+    const playing = state.playState === 'playing';
+    const pos = state.playScrub ? Number(el.playSeek.value) : playPosition();
+    const label = playing ? '暂停' : '播放';
+    if (el.playToggle.textContent !== label) {
+      el.playToggle.textContent = label;
+      el.playToggle.setAttribute('aria-label', playing ? '暂停播放' : '播放录音');
+    }
+    el.playbar.classList.toggle('is-playing', playing);
+    if (!state.playScrub) {
+      // 滑块步长 0.1，先自己取整再比，避免每帧都写一次 value。
+      const shown = String(Math.round(pos * 10) / 10);
+      if (el.playSeek.value !== shown) el.playSeek.value = shown;
+    }
+    renderPlayTime(pos);
+  }
+
+  /** 音频可用性变了才动 max / disabled：录音中、清空后、首次录到声音都要过这里。 */
+  function syncPlaybar() {
+    if (!el.playToggle || !el.playSeek) return;
+    const duration = playDurationS();
+    const usable = duration > 0 && !state.recording;
+    el.playToggle.disabled = !usable;
+    el.playSeek.disabled = !usable;
+    const max = usable ? duration.toFixed(1) : '0';
+    if (el.playSeek.max !== max) el.playSeek.max = max;
+    if (!usable && state.playState !== 'idle') stopPlayback();
+    updatePlayUI();
+  }
+
+  function startLoops() {
+    stopLoops();
+    state.playTimerId = setInterval(pump, PLAY_PUMP_MS);
+    state.playRafId = requestAnimationFrame(tick);
+  }
+
+  function stopLoops() {
+    if (state.playTimerId) {
+      clearInterval(state.playTimerId);
+      state.playTimerId = null;
+    }
+    if (state.playRafId) {
+      cancelAnimationFrame(state.playRafId);
+      state.playRafId = null;
+    }
+  }
+
+  function tick() {
+    state.playRafId = requestAnimationFrame(tick);
+    if (state.playState !== 'playing') return;
+    if (maybeFinishPlayback()) return;
+    updatePlayUI();
+  }
+
+  function stopSources() {
+    const list = state.playSources;
+    state.playSources = [];
+    list.forEach((source) => {
+      source.onended = null; // 别让已经停掉的节点回头改数组
+      try {
+        source.stop();
+      } catch {
+        /* 可能已经自然结束 */
+      }
+      try {
+        source.disconnect();
+      } catch {
+        /* 同上 */
+      }
+    });
+  }
+
+  /** Int16 PCM → 归一化到 [-1, 1) 的 Float32 声道。 */
+  function pcmToChannel(pcm, channel) {
+    for (let i = 0; i < pcm.length; i += 1) channel[i] = pcm[i] / 32768;
+  }
+
+  /**
+   * 读并排入**一个** 30 s 窗口。返回 'ok' | 'end' | 'stale' | 'error'。
+   *
+   * 空窗口（fromByte === toByte）只表示「没有更多数据了」：此刻队列里可能还有
+   * 最长 30 s 的尾巴在放，所以只置 playExhausted，由 pump 等队列放空后再收尾。
+   */
+  async function loadNextWindow() {
+    const ctx = state.playCtx;
+    const sched = state.playSched;
+    const store = state.store;
+    if (!ctx || !sched || !store) return 'error';
+
+    const token = state.playToken;
+    try {
+      const win = Playback.windowFor({
+        positionS: state.playPos,
+        windowS: PLAY_WINDOW_S,
+        sampleRate: SAMPLE_RATE,
+        totalBytes: store.totalBytes,
+      });
+
+      // 空窗口就是「播到结尾」：不抛错、不重试，等尾巴放完由 pump 收尾。
+      if (win.fromByte === win.toByte) {
+        state.playExhausted = true;
+        return 'end';
+      }
+
+      const raw = await store.read(win.fromByte, win.toByte);
+      if (token !== state.playToken) return 'stale'; // seek/停止期间读完的，丢弃
+
+      const pcm = new Int16Array(raw);
+      if (pcm.length === 0) {
+        state.playExhausted = true;
+        return 'end';
+      }
+
+      const buffer = ctx.createBuffer(1, pcm.length, SAMPLE_RATE);
+      pcmToChannel(pcm, buffer.getChannelData(0));
+
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      source.onended = () => {
+        state.playSources = state.playSources.filter((item) => item !== source);
+      };
+
+      const startAt = sched.nextStartAt(ctx.currentTime);
+      source.start(startAt);
+      sched.advance(startAt, buffer.duration);
+      state.playSources.push(source);
+      state.playPos += buffer.duration;
+      state.playExhausted = false;
+      return 'ok';
+    } catch (error) {
+      // 读不出来（文件被丢弃、Worker 出错）就停在当前位置，不跳到末尾也不重试。
+      console.warn('[echonote] 回放读取失败：', error);
+      stopAt(playPosition());
+      return 'error';
+    }
+  }
+
+  /** 同一时刻只允许一笔窗口读取：并发读同一段既浪费又会让时间线重叠。 */
+  function requestWindow() {
+    if (state.playLoad) return state.playLoad;
+    const task = loadNextWindow();
+    state.playLoad = task;
+    const done = () => {
+      if (state.playLoad === task) state.playLoad = null;
+    };
+    task.then(done, done);
+    return task;
+  }
+
+  /** 队列余量不足 5 s 就补一块；已到末尾则等尾巴放完再收尾。 */
+  function pump() {
+    if (state.playState !== 'playing') return;
+    if (maybeFinishPlayback()) return;
+    if (state.playExhausted) return;
+    const ctx = state.playCtx;
+    const sched = state.playSched;
+    if (!ctx || !sched) return;
+    if (state.playLoad) return;
+    if (sched.nextTime - ctx.currentTime > PLAY_PREFETCH_S) return;
+    requestWindow();
+  }
+
+  function maybeFinishPlayback() {
+    if (state.playState !== 'playing' || !state.playExhausted) return false;
+    const ctx = state.playCtx;
+    const sched = state.playSched;
+    if (!ctx || !sched) return false;
+    if (ctx.currentTime < sched.nextTime) return false;
+    finishPlayback();
+    return true;
+  }
+
+  /** 停在 `positionS`：状态回 idle，队列清空，上下文挂起但保留。 */
+  function stopAt(positionS) {
+    const duration = playDurationS();
+    state.playPos = Math.max(0, Math.min(duration, Number(positionS) || 0));
+    state.playExhausted = false;
+    state.playState = 'idle';
+    stopLoops();
+    stopSources();
+    if (state.playCtx && state.playSched) {
+      state.playSched.reset(state.playCtx.currentTime);
+      state.playCtx.suspend().catch(() => {});
+    }
+    updatePlayUI();
+  }
+
+  /** 正常播完：进度条拉满、状态回 idle。 */
+  function finishPlayback() {
+    stopAt(playDurationS());
+  }
+
+  /** 硬停：位置归零。录音开始、换会话、播放条变灰时调用。 */
+  function stopPlayback() {
+    state.playToken += 1;
+    state.playState = 'idle';
+    state.playExhausted = false;
+    state.playPos = 0;
+    state.playScrub = false;
+    state.playResume = false;
+    stopLoops();
+    stopSources();
+    if (state.playCtx && state.playSched) {
+      state.playSched.reset(state.playCtx.currentTime);
+      state.playCtx.suspend().catch(() => {});
+    }
+    highlightRow(null);
+    updatePlayUI();
+  }
+
+  function pausePlayback() {
+    if (state.playState !== 'playing') return;
+    state.playState = 'paused';
+    stopLoops();
+    if (state.playCtx) state.playCtx.suspend().catch(() => {});
+    updatePlayUI();
+  }
+
+  async function resumePlayback() {
+    const ctx = state.playCtx;
+    if (!ctx) return;
+    state.playState = 'playing';
+    try {
+      await ctx.resume();
+    } catch {
+      /* 被系统挂起时留待下一次手势 */
+    }
+    startLoops();
+    updatePlayUI();
+    pump();
+  }
+
+  async function startPlayback() {
+    const duration = playDurationS();
+    if (duration <= 0) return;
+    const ctx = ensurePlayCtx();
+    if (!ctx) return;
+
+    if (state.playPos >= duration - 0.05) state.playPos = 0; // 播完再按播放＝从头
+    const seekId = state.playSeekId;
+    state.playToken += 1;
+    state.playExhausted = false;
+    stopLoops();
+    stopSources();
+    // 先等上一次 seek/stop 留下的读取落地（结果已被 token 判为过期），
+    // 否则 requestWindow() 会把它当成自己的请求，新位置一块也排不上。
+    if (state.playLoad) {
+      try {
+        await state.playLoad;
+      } catch {
+        /* loadNextWindow 自己吞掉了错误 */
+      }
+      if (seekId !== state.playSeekId) return; // 等的时候来了 seek，交给它
+    }
+
+    state.playState = 'playing';
+    state.playSched.reset(ctx.currentTime);
+    try {
+      await ctx.resume(); // 必须在用户手势里：新上下文默认是 suspended
+    } catch {
+      /* 同上 */
+    }
+    startLoops();
+    updatePlayUI();
+    await requestWindow(); // 首块不等 500 ms 的 pump，点下去就排
+  }
+
+  function togglePlay() {
+    if (state.recording || playDurationS() <= 0) return;
+    if (state.playState === 'seeking') return; // 正在定位，等它收尾
+    if (state.playState === 'playing') {
+      pausePlayback();
+      return;
+    }
+    if (state.playState === 'paused') {
+      resumePlayback();
+      return;
+    }
+    startPlayback();
+  }
+
+  /**
+   * 跳到 `seconds` 并（可选）继续播。
+   *
+   * 步骤固定：作废在途读取 → 停掉全部在播 source → 等最后那笔读取落地 →
+   * 重置调度时间线 → 改位置 → 载入该位置窗口 → 回到播放或暂停。
+   * seek 到末尾时窗口为空，状态回到 idle 且进度条停在末尾，不会卡在 playing。
+   */
+  async function seekTo(seconds, options = {}) {
+    const duration = playDurationS();
+    // 录音中一律不定位：正在写的文件还没定稿，回放声也会被录进去。
+    if (duration <= 0 || state.recording) return;
+    const ctx = ensurePlayCtx();
+    if (!ctx) return;
+
+    const target = Math.min(Math.max(0, Number(seconds) || 0), duration);
+    // 连按方向键时会有多次 seek 叠在一起，用 intent 记住「定位完还要不要继续播」，
+    // 否则第二次 seek 看到的是 seeking 状态，收尾时会把播放误判成暂停。
+    const intent =
+      options.play === true ||
+      state.playState === 'playing' ||
+      (state.playState === 'seeking' && state.playResume);
+    state.playResume = intent;
+    state.playSeekId += 1;
+    const seekId = state.playSeekId;
+
+    state.playToken += 1;
+    state.playState = 'seeking';
+    state.playExhausted = false;
+    stopLoops();
+    stopSources();
+    if (state.playLoad) {
+      try {
+        await state.playLoad; // 不能和它并发；它的结果已被 token 判为过期
+      } catch {
+        /* loadNextWindow 自己吞掉了错误 */
+      }
+      if (seekId !== state.playSeekId) return; // 等的时候又来了新 seek，交给它
+    }
+
+    state.playSched.reset(ctx.currentTime);
+    state.playPos = target;
+    updatePlayUI();
+
+    await requestWindow();
+
+    if (seekId !== state.playSeekId) return; // 同上：后来的 seek 说了算
+    if (state.playState !== 'seeking') return; // 期间又被停止/开始了
+    if (intent) {
+      state.playState = 'playing';
+      try {
+        await ctx.resume();
+      } catch {
+        /* 同上 */
+      }
+      startLoops();
+      pump();
+    } else {
+      state.playState = 'paused';
+      ctx.suspend().catch(() => {});
+    }
+    updatePlayUI();
+  }
+
+  /** 字幕行高亮：定位行一律走 findRow(id)，下一任务换成 Map 时只改这一处。 */
+  function highlightRow(id) {
+    if (state.playRowId === id) return;
+    const previous = state.playRowId ? findRow(state.playRowId) : null;
+    if (previous) previous.classList.remove('is-playing');
+    state.playRowId = id;
+    const row = id ? findRow(id) : null;
+    if (row) row.classList.add('is-playing');
+  }
+
+  /** 左右方向键是否该接管：回放已开始（含暂停）且不在录音。 */
+  function playbackEngaged() {
+    return !!Playback && !state.recording && state.playState !== 'idle' && playDurationS() > 0;
+  }
+
+  /**
+   * 空格归回放的判据：最近一次交互在播放条内；或者此刻正出声——正在播的时候
+   * 空格只能是暂停，绝不能变成「开始录音」。
+   */
+  function spaceGoesToPlayback() {
+    if (!Playback || state.recording || playDurationS() <= 0) return false;
+    if (state.playState === 'playing' || state.playState === 'seeking') return true;
+    return state.playInteracted;
+  }
+
+  function wirePlaybar() {
+    if (!el.playToggle || !el.playSeek) return;
+
+    el.playToggle.addEventListener('click', () => togglePlay());
+
+    // 拖拽期间只更新数字，松手（change）才真正 seek：每次 input 都读窗口会把
+    // 磁盘打满。scrub 只在 input 里置位，避免「点一下滑块不拖动」把标志卡住。
+    el.playSeek.addEventListener('input', () => {
+      state.playScrub = true;
+      renderPlayTime(Number(el.playSeek.value));
+    });
+    el.playSeek.addEventListener('change', () => {
+      const value = Number(el.playSeek.value);
+      state.playScrub = false;
+      seekTo(value);
+    });
+
+    // 「最近一次交互在播放条内」：捕获阶段记，早于任何 click。
+    document.addEventListener(
+      'pointerdown',
+      (event) => {
+        state.playInteracted = !!el.playbar && el.playbar.contains(event.target);
+      },
+      true
+    );
+
+    // 点字幕行＝跳到该句开头并开始播。
+    el.finals.addEventListener('click', (event) => {
+      const row = event.target.closest ? event.target.closest('.segment') : null;
+      if (!row || !el.finals.contains(row) || playDurationS() <= 0) return;
+      const item = state.finals.find((entry) => entry.id === row.dataset.id);
+      if (!item) return;
+      highlightRow(item.id);
+      seekTo(item.start, { play: true });
+    });
   }
 
   /* ─────────────────────────── new session dialog ─────────────────────────── */
@@ -1607,6 +2097,7 @@
   el.copyBtn.addEventListener('click', copyTranscript);
   el.clearBtn.addEventListener('click', () => clearTranscript(true));
   el.retryBtn.addEventListener('click', retryModel);
+  wirePlaybar();
 
   el.exportBtn.addEventListener('click', (event) => {
     event.stopPropagation();
@@ -1687,16 +2178,17 @@
   }
 
   /**
-   * Space toggles recording only when it is not being used as an input key.
-   * Buttons/links/inputs keep their native behaviour, `event.repeat` is
-   * ignored and nothing is preventDefault-ed inside a text field (FR-002).
+   * 空格：输入焦点在控件里时一律不拦截（原生行为优先）。之后按「最近一次交互
+   * 是否在播放条内 / 是否正在出声」决定归回放还是归录音，录音是兜底——这与
+   * v0.11 的语义一致，只是多了回放这一层优先级。
+   *
+   * 左右方向键只在回放激活（含暂停）时接管 ±5 s，控件内的方向键留给控件。
    */
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && !el.exportMenu.hidden) {
       closeMenu(true);
       return;
     }
-    if (event.code !== 'Space' && event.key !== ' ') return;
 
     const target = event.target;
     if (!target) return;
@@ -1704,11 +2196,28 @@
     const isFormControl =
       target.isContentEditable ||
       ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A', 'OPTION'].includes(tag);
+
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      if (isFormControl || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (!playbackEngaged()) return;
+      event.preventDefault(); // 按住不放也不让它滚页面
+      // 按住不放不连发：每按一次读一块 30 s 窗口，自动重复会把磁盘刷爆。
+      if (event.repeat) return;
+      const step = event.key === 'ArrowLeft' ? -PLAY_SEEK_STEP_S : PLAY_SEEK_STEP_S;
+      seekTo(playPosition() + step);
+      return;
+    }
+
+    if (event.code !== 'Space' && event.key !== ' ') return;
     if (isFormControl) return;
     if (!el.exportMenu.hidden) return;
     if (event.repeat) return;
 
     event.preventDefault();
+    if (spaceGoesToPlayback()) {
+      togglePlay();
+      return;
+    }
     toggleRecording();
   });
 

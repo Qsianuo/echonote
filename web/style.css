@@ -694,6 +694,18 @@ select {
   padding: 12px 0;
   border-bottom: 1px dashed rgba(100, 255, 218, 0.07);
   animation: fade-in 0.28s ease;
+  cursor: pointer;
+}
+
+/* 回放定位到的那一行：左侧亮条 + 淡底，和「正在播的是这句」对上。 */
+.segment.is-playing {
+  background: linear-gradient(90deg, rgba(100, 255, 218, 0.1), rgba(100, 255, 218, 0));
+  box-shadow: inset 2px 0 0 var(--accent);
+  border-radius: 4px;
+}
+
+.segment.is-playing .ts {
+  color: var(--accent);
 }
 
 .segment .badge {
@@ -776,6 +788,95 @@ select {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* ─────────────────────────── playbar ─────────────────────────── */
+
+.playbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 22px;
+  border-top: 1px solid rgba(100, 255, 218, 0.07);
+  background: rgba(10, 25, 47, 0.28);
+}
+
+.play-toggle {
+  flex: none;
+  min-width: 64px;
+  padding: 7px 12px;
+  border-radius: 9px;
+  border: 1px solid var(--border-strong);
+  background: rgba(100, 255, 218, 0.08);
+  color: var(--accent);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: 0.18s;
+}
+
+.play-toggle:hover:not(:disabled) {
+  background: rgba(100, 255, 218, 0.16);
+}
+
+/* 没有音频时整条禁用：按钮 35% 透明且不可点，避免"点了没反应"。 */
+.play-toggle:disabled {
+  opacity: 0.35;
+  color: var(--muted);
+  border-color: var(--border);
+  background: transparent;
+  cursor: not-allowed;
+}
+
+.play-seek {
+  flex: 1;
+  min-width: 0;
+  height: 4px;
+  margin: 0;
+  padding: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  border-radius: 999px;
+  background: rgba(100, 255, 218, 0.16);
+  cursor: pointer;
+}
+
+.play-seek::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 13px;
+  height: 13px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 10px rgba(100, 255, 218, 0.45);
+  cursor: pointer;
+}
+
+.play-seek::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 10px rgba(100, 255, 218, 0.45);
+  cursor: pointer;
+}
+
+.play-seek:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.play-time {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.playbar.is-playing .play-time {
+  color: var(--accent);
 }
 
 .panel-foot {
@@ -924,6 +1025,15 @@ dialog p b {
 
   .segment {
     gap: 10px;
+  }
+
+  .playbar {
+    padding: 9px 16px;
+    gap: 9px;
+  }
+
+  .play-time {
+    font-size: 11px;
   }
 }
 

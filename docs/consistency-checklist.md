@@ -31,6 +31,10 @@ grep -rn "3\.9+" README.md start.bat run.sh app/     # 必须为空
 | 10 | 新增配置已文档化 | `grep -n "ECHONOTE_MAX_RECORD_MINUTES\|ECHONOTE_ALLOW_NONLOCAL" README.md` | 各命中 | ✅ 均在配置表 |
 | 11 | 探针语义已写明 | `grep -n "仅表示进程存活" README.md` | 命中 | ✅ `/api/health` 行 |
 | 12 | 前端无 `innerHTML` 渲染 | `grep -rn "innerHTML" web/` | 空 | ✅ 空（全部 `textContent`） |
+| 13 | 协议版本 v4 已文档化 | `grep -n '"protocol":"4"' README.md` | 命中 | ✅ 实测命中 1 处（协议段 `{"type":"status","protocol":"4",...}`） |
+| 14 | 请求路径不触发模型下载 | `grep -rn "snapshot_download" app/main.py app/stt.py app/desktop.py` | 空 | ✅ 空（下载只出现在 `app/fetch.py`，服务请求路径不碰） |
+| 15 | 离线模式已文档化 | `grep -n "ECHONOTE_OFFLINE" README.md` | 命中 | ✅ 实测命中 2 处（配置表 + 离线场景表） |
+| 16 | 模型切换已文档化 | `grep -n "识别模型" README.md` | 命中 | ✅ 实测命中 4 处（功能列表、界面说明、FAQ 速度/准确率段） |
 | 17 | 旧堆内音频数组已彻底移除 | `grep -rn "audioChunks" web/` | 空 | ✅ 空（v0.12 改 `AudioStore`：OPFS 落盘 / 内存降级，`app.js` 只剩一个字节计数器） |
 | 18 | VAD 预滚已文档化 | `grep -n "ECHONOTE_VAD_PREROLL_MS" README.md` | 命中 | ✅ 实测命中 1 处（配置表，默认 `300`，写明按 30 ms 取整为 10 帧、时间轴最多前移 300 ms） |
 | 19 | `timing` 消息已文档化 | `grep -n '"type":"timing"' README.md` | 命中 | ✅ 实测命中 1 处（协议段示例 `{"type":"timing","epoch":1,"turn_id":"1-1","speech_finished_at":12345.68,"segments":{"to_first_text_ms":2140.5}}`，另有文字说明 v4 新增该消息） |

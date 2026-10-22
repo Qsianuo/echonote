@@ -189,6 +189,23 @@ VAD_PREROLL_MS = _env_int("ECHONOTE_VAD_PREROLL_MS", 300)
 # words from the transcript.
 REPEAT_MAX_DURATION_S = _env_float("ECHONOTE_REPEAT_MAX_DURATION_S", 1.5)
 
+# Peak normalisation, experimental and **off by default**.
+#
+# Distant or quiet speech is the weakest point of the current pipeline, and
+# scaling the buffer up to a fixed peak is the cheap fix a reference
+# implementation uses. It is not switched on because faster-whisper already
+# normalises inside its log-mel front end, so the gain may be mostly overlap
+# and the risk (lifting room noise along with the voice) is real. Turn it on
+# only after measuring CER with and without it on real recordings:
+# ``ECHONOTE_PEAK_NORMALIZE=1``.
+#
+# ``PEAK_MAX_GAIN`` caps how far a nearly silent buffer is lifted: 8x is
+# ~+18 dB, enough for a person across the room and not enough to turn hiss
+# into something the decoder reads as speech.
+PEAK_NORMALIZE = _env_flag("ECHONOTE_PEAK_NORMALIZE")
+PEAK_TARGET = 0.95
+PEAK_MAX_GAIN = 8.0
+
 # --------------------------------------------------------------------------
 # Decoding
 #

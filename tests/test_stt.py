@@ -529,3 +529,45 @@ def test_laughter_is_not_mistaken_for_a_loop():
 
 def test_normal_text_is_untouched_by_the_loop_guard():
     assert stt._collapse_repetition("你好,这是回声笔记。") == "你好,这是回声笔记。"
+
+
+# --------------------------------------------------------------------------
+# Peak normalisation (experimental, off by default)
+#
+# Distant or quiet speech is the failure case this targets. The tests pin the
+# three guards that keep it from making things *worse*, which is the whole
+# reason the switch defaults to off.
+# --------------------------------------------------------------------------
+
+
+def test_peak_normalize_boosts_quiet_audio():
+    # 0.2 -> 0.95 is 4.75x, inside the 8x cap. The original 0.05 would need
+    # 19x, so the cap — not the target — decides the result; that case is
+    # test_peak_normalize_respects_max_gain's job.
+    x = np.full(16000, 0.2, dtype=np.float32)
+    y = stt._peak_normalize(x, 0.95, 8.0)
+    assert float(np.max(np.abs(y))) == pytest.approx(0.95, abs=1e-5)
+
+
+def test_peak_normalize_respects_max_gain():
+    x = np.full(16000, 0.01, dtype=np.float32)   # 理论上需要 95× 增益
+    y = stt._peak_normalize(x, 0.95, 8.0)
+    assert float(np.max(np.abs(y))) == pytest.approx(0.08, abs=1e-5)
+
+
+def test_peak_normalize_leaves_silence_alone():
+    x = np.zeros(16000, dtype=np.float32)
+    y = stt._peak_normalize(x, 0.95, 8.0)
+    assert np.array_equal(y, x)
+
+
+def test_peak_normalize_never_attenuates():
+    # Must sit *above* the target: at 0.9 the gain is 1.06 (> 1.0), so the
+    # documented behaviour is to raise it to 0.95, not to leave it alone.
+    x = np.full(16000, 0.98, dtype=np.float32)
+    y = stt._peak_normalize(x, 0.95, 8.0)
+    assert float(np.max(np.abs(y))) == pytest.approx(0.98, abs=1e-6)
+
+
+def test_peak_normalize_is_off_by_default():
+    assert config.PEAK_NORMALIZE is False

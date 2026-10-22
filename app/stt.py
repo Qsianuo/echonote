@@ -557,6 +557,58 @@ def _live_engine():
     return _model, _infer_lock
 
 
+# --------------------------------------------------------------------------
+# Peak normalisation (experimental)
+#
+# Off by default (``config.PEAK_NORMALIZE``). It exists to rescue distant or
+# very quiet speech, where the recorder's level is far below what the model
+# was trained on. It is not a free win: faster-whisper's log-mel front end
+# already normalises, so the usable part of the gain may be small, while every
+# gain also lifts the noise floor. Measure CER before turning it on.
+# --------------------------------------------------------------------------
+
+# Below this peak the buffer carries no speech at all, only the recorder's
+# self-noise. Multiplying that by 8 would hand the decoder a loud hiss and it
+# would start inventing words — the exact failure this guard prevents.
+SILENCE_PEAK = 1e-4
+
+
+def _peak_normalize(samples: np.ndarray, target: float, max_gain: float) -> np.ndarray:
+    """Scale ``samples`` so its peak reaches ``target``, capped at ``max_gain``.
+
+    Amplification only. Three guards, each one there because the naive version
+    made something worse:
+
+    * empty buffer → returned untouched (nothing to measure);
+    * ``peak <= SILENCE_PEAK`` → returned untouched, so silence and room noise
+      are never amplified into something the decoder can hallucinate from;
+    * ``gain <= 1.0`` → returned untouched. Attenuating a healthy recording
+      would lower its level *and* its SNR, which is the opposite of the goal.
+    """
+    if samples is None or samples.size == 0:
+        return samples
+    peak = float(np.max(np.abs(samples)))
+    if peak <= SILENCE_PEAK:
+        return samples
+    gain = min(target / peak, max_gain)
+    if gain <= 1.0:
+        return samples
+    return (samples * gain).astype(np.float32, copy=False)
+
+
+def _prepare(audio: np.ndarray) -> np.ndarray:
+    """Apply the experimental pre-processing the config asks for.
+
+    Both ASR entry points go through here so the live caption and the final
+    transcript of the same sentence are decoded from the same buffer; feeding
+    one path normalised audio and the other raw audio is how the two versions
+    of one sentence end up disagreeing.
+    """
+    if not config.PEAK_NORMALIZE:
+        return audio
+    return _peak_normalize(audio, config.PEAK_TARGET, config.PEAK_MAX_GAIN)
+
+
 def transcribe_live(
     audio: np.ndarray,
     language: str | None = None,
@@ -577,6 +629,7 @@ def transcribe_live(
 
     lang = None if not language or language == "auto" else language
     prompt = _prompt_for(lang, _live_key)
+    audio = _prepare(audio)
 
     with lock:
         started = time.perf_counter()
@@ -653,6 +706,7 @@ def transcribe(
 
     lang = None if not language or language == "auto" else language
     prompt = _prompt_for(lang, _loaded_key)
+    audio = _prepare(audio)
 
     with _infer_lock:
         started = time.perf_counter()

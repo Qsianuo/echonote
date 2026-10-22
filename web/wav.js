@@ -21,10 +21,15 @@
     return (chunks || []).reduce((sum, chunk) => sum + (chunk ? chunk.length : 0), 0);
   }
 
-  function buildWavBuffer(chunks, sampleRate) {
+  /**
+   * 只写 44 字节 RIFF 头。`totalSamples` 是总样本数（不是字节数）：
+   * 原 `buildWavBuffer` 的 `36 + total * 2` 与 `total * 2` 都基于它。
+   * 抽出来供流式导出复用，`buildWavBuffer` 也调用它，两者天然同源。
+   */
+  function buildWavHeader(totalSamples, sampleRate) {
     const rate = sampleRate || DEFAULT_SAMPLE_RATE;
-    const total = sampleCount(chunks);
-    const buffer = new ArrayBuffer(HEADER_BYTES + total * 2);
+    const total = totalSamples || 0;
+    const buffer = new ArrayBuffer(HEADER_BYTES);
     const view = new DataView(buffer);
 
     const writeString = (offset, text) => {
@@ -47,6 +52,14 @@
     writeString(36, 'data');
     view.setUint32(40, total * 2, true);
 
+    return buffer;
+  }
+
+  function buildWavBuffer(chunks, sampleRate) {
+    const total = sampleCount(chunks);
+    const buffer = new ArrayBuffer(HEADER_BYTES + total * 2);
+    new Uint8Array(buffer, 0, HEADER_BYTES).set(new Uint8Array(buildWavHeader(total, sampleRate)));
+
     let offset = HEADER_BYTES;
     (chunks || []).forEach((chunk) => {
       if (!chunk || chunk.length === 0) return;
@@ -67,6 +80,14 @@
     return new Blob([buffer], { type: 'audio/wav' });
   }
 
+  /**
+   * 流式导出：头是 44 字节的字面量，PCM 直接以 Blob 形式交给 Blob 构造函数。
+   * 浏览器只记录引用、不复制 PCM，所以峰值不随录音时长增长（PRD PR-09）。
+   */
+  function buildWavBlobFromParts(header, pcm) {
+    return new Blob([header, pcm], { type: 'audio/wav' });
+  }
+
   function durationSeconds(chunks, sampleRate) {
     const rate = sampleRate || DEFAULT_SAMPLE_RATE;
     return sampleCount(chunks) / rate;
@@ -80,8 +101,10 @@
     HEADER_BYTES,
     DEFAULT_SAMPLE_RATE,
     sampleCount,
+    buildWavHeader,
     buildWavBuffer,
     buildWavBlob,
+    buildWavBlobFromParts,
     durationSeconds,
     byteLength,
   };

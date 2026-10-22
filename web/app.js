@@ -1414,12 +1414,13 @@
 
     if (format === 'wav') {
       if (!state.store || !state.ledger || state.ledger.sampleCount === 0) return;
-      const peakMib = Math.ceil(state.ledger.byteLength / 1048576);
-      setHint(`正在导出 WAV，预计占用约 ${peakMib} MiB 内存…`);
+      setHint('正在导出 WAV…');
       try {
-        // 过渡实现：整体读成一段 PCM 再套 WAV 头，Task 4 换成流式拼接。
-        const buf = await (await state.store.toBlob()).arrayBuffer();
-        const blob = Wav.buildWavBlob([new Int16Array(buf)], SAMPLE_RATE);
+        // 44 字节头 + PCM Blob 直接拼：OPFS 模式下 PCM 从不读进内存，
+        // 峰值与录音时长无关（PRD PR-09）。
+        const pcm = await state.store.toBlob();
+        const header = Wav.buildWavHeader(state.ledger.sampleCount, SAMPLE_RATE);
+        const blob = Wav.buildWavBlobFromParts(header, pcm);
         download(blob, Expo.fileName(meta, 'wav'), 'audio/wav');
       } catch (error) {
         showError(`导出 WAV 失败：${error.message || error}`);

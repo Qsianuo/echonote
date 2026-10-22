@@ -80,3 +80,22 @@ test('merging 100 ms frames does not change the audio length (FR-038 AC6)', () =
   assert.equal(merged, 16000);
   assert.equal(Wav.durationSeconds(frames, RATE), 1);
 });
+
+test('buildWavHeader matches buildWavBuffer prefix byte-for-byte', () => {
+  const chunks = [new Int16Array(1600), new Int16Array(800)];
+  const full = new Uint8Array(Wav.buildWavBuffer(chunks, 16000));
+  const head = new Uint8Array(Wav.buildWavHeader(2400, 16000));
+
+  assert.equal(head.length, 44);
+  assert.deepEqual(Array.from(head), Array.from(full.slice(0, 44)));
+});
+
+test('buildWavBlobFromParts reports audio/wav and the right size', async () => {
+  const blob = Wav.buildWavBlobFromParts(
+    Wav.buildWavHeader(2400, 16000),
+    new Blob([new Int16Array(2400).buffer], { type: 'application/octet-stream' })
+  );
+
+  assert.equal(blob.type, 'audio/wav');
+  assert.equal(blob.size, 44 + 4800);
+});

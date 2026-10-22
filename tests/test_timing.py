@@ -9,6 +9,7 @@ number is reported instead of being flattened.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -347,3 +348,103 @@ def test_a_turn_reports_once_per_visible_milestone(client, monkeypatch, caplog):
     assert len(lines) == 2
     logged = json.loads(lines[1].split(" ", 1)[1])
     assert logged == timings[1]
+
+
+class _InlineLoop:
+    """``StreamingSession._emit`` hops onto the event loop to enqueue messages.
+
+    A real loop is not needed to observe them: running the callback inline on
+    the emitting thread keeps ``results`` ordered and lets the test drive the
+    session's ``push`` directly.
+    """
+
+    def call_soon_threadsafe(self, callback, *args) -> None:
+        callback(*args)
+
+
+def _wait_until(predicate, timeout: float = 3.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return False
+
+
+def _drain(session, kind: str, timeout: float = 5.0) -> dict:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            message = session.results.get_nowait()
+        except asyncio.QueueEmpty:
+            time.sleep(0.02)
+            continue
+        if message.get("type") == kind:
+            return message
+    raise AssertionError(f"no {kind} message from the session")
+
+
+def test_a_short_misfire_dropped_in_the_same_push_does_not_poison_the_next_sentence(
+    monkeypatch,
+):
+    """The discard and the next segment's start can land inside one push.
+
+    One push runs several 30 ms VAD frames, so the frame that completes the
+    hangover and throws a too-short segment away can be immediately followed by
+    the frame that opens the next segment. When the push returns, ``in_speech``
+    is True again and ``current_audio()`` was emptied by the discard, so
+    ``in_speech`` says nothing about whether the utterance ended. The segment's
+    start frame does, which is what the worker keys on now: without it the
+    second sentence kept feeding the discarded buffer and inherited its start
+    clock.
+    """
+    monkeypatch.setattr(stt, "is_ready", lambda: True)
+    monkeypatch.setattr(stt, "transcribe_live", lambda audio, language=None, **_: "实时字幕")
+    monkeypatch.setattr(
+        stt, "transcribe", lambda audio, language=None, fast=False, **_: "精修字幕"
+    )
+    monkeypatch.setattr(stt, "refine_enabled", lambda: False)
+
+    session = main.StreamingSession(_InlineLoop(), session_id=91)
+    session.start()
+    try:
+        # Preroll first: ``current_audio`` refuses a buffer under 250 ms, so a
+        # 150 ms burst only opens a segment when there is audio in front of it.
+        session.push(np.concatenate((silence(0.4), speech(0.15))))
+        assert _wait_until(lambda: session._segment_start_frame is not None)
+        misfire_started_at = session._turn_started_at
+        assert misfire_started_at is not None
+
+        time.sleep(0.9)  # a stale clock would now be ~0.9 s behind
+        before_push = time.perf_counter()
+
+        # ONE push: the leading silence finishes the hangover and discards the
+        # burst, and the sentence behind it opens the next segment in the same
+        # ``Segmenter.push`` call.
+        session.push(np.concatenate((silence(0.95), speech(2.6))))
+
+        assert _wait_until(lambda: session._first_text_at is not None)
+        assert session._turn_started_at is not None
+        # Rebuilt for the second segment, not inherited from the first.
+        assert session._turn_started_at > misfire_started_at
+        assert session._turn_started_at >= before_push
+
+        session.flush()
+        final = _drain(session, "final")
+        timing = _drain(session, "timing")
+        leftovers = []
+        while True:
+            try:
+                leftovers.append(session.results.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+    finally:
+        session.stop()
+        assert session.wait_done(5.0)
+
+    # The discarded burst never became a row, so it never reported a latency.
+    assert final["id"] == "1-1"
+    assert [m for m in leftovers if m["type"] == "timing"] == []
+    assert timing["turn_id"] == final["id"]
+    # Only the second sentence is measured.
+    assert timing["segments"]["to_first_text_ms"] < 600

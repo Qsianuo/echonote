@@ -268,8 +268,15 @@ class StreamingSession:
         # of speech, since it appears before the pause); ``_timings`` holds the
         # marks of turns whose refinement has not landed yet, keyed by
         # ``final.id``.
+        #
+        # ``_segment_start_frame`` is the identity of the segment the captioner
+        # is following. It is how "is this still the same utterance?" gets
+        # answered: ``in_speech`` cannot answer it, because one push can hold
+        # both the frame that ends a segment and the frame that starts the next
+        # one (see ``_run``).
         self._first_text_at: float | None = None
         self._turn_started_at: float | None = None
+        self._segment_start_frame: int | None = None
         self._timings: dict[str, TurnTiming] = {}
 
         self._live: LiveCaptioner | None = None
@@ -422,6 +429,7 @@ class StreamingSession:
         """
         self._turn_started_at = None
         self._first_text_at = None
+        self._segment_start_frame = None
         self._last_partial = ""
         if self._live is not None:
             self._live.reset()
@@ -457,12 +465,19 @@ class StreamingSession:
                 events = segmenter.push(chunk)
                 for event in events:
                     self._complete(event)
-                if events or (in_utterance and not segmenter.in_speech):
-                    # The segment the captioner was pointed at is over. The
-                    # second half of the condition is a segment the segmenter
-                    # *discarded*: it produces no event, so relying on
-                    # ``events`` alone left ``in_utterance`` and the turn's
-                    # start clock stuck on a segment that no longer exists.
+
+                # "Still the same utterance?" is a question about segment
+                # identity, not about ``in_speech``: one push runs several
+                # 30 ms VAD frames, so the frame that ends a discarded segment
+                # and the frame that opens the next one can land in the same
+                # call — by the time this line runs, ``in_speech`` is already
+                # True again. The start frame changes whenever a segment opens,
+                # so it catches both exits: the one with an event and the one
+                # where the segmenter threw a too-short segment away.
+                if events or (
+                    self._segment_start_frame is not None
+                    and segmenter.segment_start_frame != self._segment_start_frame
+                ):
                     in_utterance = False
                     self._end_utterance_state()
 
@@ -478,6 +493,11 @@ class StreamingSession:
                             # here rather than in the segmenter so ``vad.py``
                             # stays free of wall-clock reads.
                             self._turn_started_at = time.perf_counter()
+                            # Recorded only after a begin that actually
+                            # happened: a None seed has to stay retryable on
+                            # the next frame, or the segment would never be
+                            # captioned at all.
+                            self._segment_start_frame = segmenter.segment_start_frame
                             in_utterance = True
                 self._speaking = bool(segmenter.in_speech)
 

@@ -153,10 +153,17 @@ test('sample buffer is allocated once and reused across frames', () => {
   wf.draw(analyser);
   assert.equal(analyser.buffers.length, 3);
   assert.equal(analyser.buffers[0], analyser.buffers[2], '应复用同一个 Uint8Array');
-
-  // 换一支 binCount 不同的 analyser 才重新分配。
-  wf.draw(makeAnalyser(256));
   assert.equal(analyser.buffers[0].length, 128);
+
+  // 换一支 binCount 更大的 analyser 才重新分配：新缓冲必须按新容量重建，
+  // 不能把 128 的旧缓冲塞给 256 的 analyser（会截断一半频域数据）。
+  const wider = makeAnalyser(256);
+  wf.draw(wider);
+  assert.equal(wider.buffers.length, 1);
+  assert.equal(wider.buffers[0].length, 256, 'binCount 变大后缓冲必须按新容量重建');
+  assert.notEqual(wider.buffers[0], analyser.buffers[0], '不能复用旧容量的缓冲');
+  // 渐变只跟宽度有关：binCount 变化不该白白重建渐变（下一次 draw 仍用同一个）。
+  assert.equal(ctx.gradients.length, 1, 'binCount 变化不影响渐变缓存');
 });
 
 test('gradient is created once and invalidated by measure', () => {
@@ -178,6 +185,7 @@ test('gradient is created once and invalidated by measure', () => {
   wf.draw(analyser);
   assert.equal(ctx.gradients.length, 2, 'resize 后渐变必须重建');
   assert.equal(ctx.gradients[1].x1, 900);
+  assert.notEqual(ctx.gradients[1], ctx.gradients[0], '失效后必须换成新渐变对象');
 });
 
 test('destroy makes drawing a no-op', () => {

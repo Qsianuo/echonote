@@ -959,6 +959,10 @@
       clearError();
       setHint('正在录音 · 实时转写中');
       startTimer();
+      // 进录音态后画布才真正可见/定了尺寸：这里补量一次，免得 boot 时容器还是
+      // 0 宽高、或录音中布局变过，整段波形都画在错误尺寸的位图上。逐帧绘制
+      // 本身不再量布局，所以「启动 + 录音开始 + resize」是仅有的三个重量测点。
+      wf.measure();
       state.lastWaveDraw = 0; // 新一段录音从第一帧就画，别等 33 ms
       drawWaveform();
       updateRecordEnabled();

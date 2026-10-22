@@ -90,7 +90,7 @@ test('buildWavHeader matches buildWavBuffer prefix byte-for-byte', () => {
   assert.deepEqual(Array.from(head), Array.from(full.slice(0, 44)));
 });
 
-test('buildWavBlobFromParts reports audio/wav and the right size', async () => {
+test('buildWavBlobFromParts reports audio/wav and the right size', () => {
   const blob = Wav.buildWavBlobFromParts(
     Wav.buildWavHeader(2400, 16000),
     new Blob([new Int16Array(2400).buffer], { type: 'application/octet-stream' })

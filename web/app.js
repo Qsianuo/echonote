@@ -1414,10 +1414,16 @@
 
     if (format === 'wav') {
       if (!state.store || !state.ledger || state.ledger.sampleCount === 0) return;
-      setHint('正在导出 WAV…');
+      if (state.store.fallback) {
+        // 内存降级模式：toBlob() 要重建一份 PCM，导出峰值确实是 2×。
+        const peakMib = Math.ceil((state.ledger.byteLength * 2) / 1048576);
+        setHint(`正在导出 WAV，预计占用约 ${peakMib} MiB 内存…`);
+      } else {
+        setHint('正在导出 WAV…');
+      }
       try {
-        // 44 字节头 + PCM Blob 直接拼：OPFS 模式下 PCM 从不读进内存，
-        // 峰值与录音时长无关（PRD PR-09）。
+        // 44 字节头 + PCM Blob 直接拼。仅在 OPFS 落盘模式下 PCM 从不读进内存，
+        // 峰值才与录音时长无关（PRD PR-09）；内存降级模式仍是 2×。
         const pcm = await state.store.toBlob();
         const header = Wav.buildWavHeader(state.ledger.sampleCount, SAMPLE_RATE);
         const blob = Wav.buildWavBlobFromParts(header, pcm);

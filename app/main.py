@@ -195,9 +195,15 @@ def get_config() -> dict:
         "protocol": protocol.PROTOCOL_VERSION,
         # "local" or "remote": where recognition actually runs. The UI has to
         # say which, because only one of them keeps the audio on this machine.
-        "asr_backend": "remote"
-        if (config.ASR_REMOTE or config.ASR_REMOTE_ONLY)
-        else "local",
+        "asr_backend": (
+            "sherpa"
+            if config.ASR_BACKEND == "sherpa"
+            else (
+                "remote"
+                if (config.ASR_REMOTE or config.ASR_REMOTE_ONLY)
+                else "local"
+            )
+        ),
         "asr_remote_model": config.ASR_REMOTE_MODEL
         if (config.ASR_REMOTE or config.ASR_REMOTE_ONLY)
         else None,

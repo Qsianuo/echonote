@@ -23,6 +23,7 @@ import numpy as np
 
 from . import config, models
 from . import asr_remote
+from . import asr_sherpa
 
 log = logging.getLogger("echonote.stt")
 
@@ -156,6 +157,15 @@ def load_live() -> bool:
     """
     global _live_model, _live_key, _live_error
 
+    if config.ASR_BACKEND == "sherpa":
+        # One streaming recognizer serves both the live and the final role.
+        with _live_load_lock:
+            _live_model = None
+            _live_key = asr_sherpa.label()
+            _live_error = None
+            _live_ready.set()
+        return True
+
     if config.ASR_REMOTE:
         # The live model would never run, so loading 145 MB of weights for it
         # is pure waste — and the whole point of the switch is to stop paying
@@ -269,6 +279,21 @@ def load() -> bool:
     """
     global _model, _error, _loading, _attempts, _auto_retries, _last_failure_at
     global _loaded_key, _retry_blocked
+
+    if config.ASR_BACKEND == "sherpa":
+        # Explicit backend choice wins over everything: a zipformer needs no
+        # faster-whisper weights, so nothing else should be loaded for it.
+        ok = asr_sherpa.load()
+        _loaded_key = asr_sherpa.label()
+        if ok:
+            _error = None
+            _ready.set()
+        else:
+            _error = "sherpa-onnx 模型未就绪：请检查 models/sherpa-zipformer-zh 下的四个文件"
+            _ready.clear()
+            _retry_blocked = True
+            log.error("%s", _error)
+        return ok
 
     if config.ASR_REMOTE:
         # Nothing to load: the decoder sits at the other end of an HTTP call.
@@ -533,7 +558,19 @@ def status() -> dict:
         "refine_blocked": refine_blocked_reason(),
         "live_ms": live_ms(),
     }
-    if config.ASR_REMOTE:
+    if config.ASR_BACKEND == "sherpa":
+        # Same reasoning as the remote branch: the faster-whisper names would
+        # describe a model that is not loaded and will not be used.
+        result["backend"] = "sherpa"
+        result["model"] = asr_sherpa.label()
+        result["model_key"] = "sherpa"
+        result["model_label"] = "sherpa 流式"
+        result["live_model"] = asr_sherpa.label()
+        result["live_model_key"] = "sherpa"
+        result["live_model_label"] = "sherpa 流式"
+        result["rtf"] = None
+        result["offline_ready"] = asr_sherpa.is_installed()
+    elif config.ASR_REMOTE:
         # The local model names are meaningless here: nothing was loaded, and
         # reporting "base" while an HTTP call does the work would send anyone
         # debugging this in the wrong direction.
@@ -694,6 +731,10 @@ def transcribe_live(
     lang = None if not language or language == "auto" else language
     audio = _prepare(audio)
 
+    if config.ASR_BACKEND == "sherpa":
+        text = asr_sherpa.transcribe(audio, lang)
+        return "" if text is None else _clean(text, None)
+
     if config.ASR_REMOTE:
         remote = asr_remote.transcribe(audio, lang, live=True)
         if remote is not None:
@@ -788,6 +829,10 @@ def transcribe(
 
     lang = None if not language or language == "auto" else language
     audio = _prepare(audio)
+
+    if config.ASR_BACKEND == "sherpa":
+        text = asr_sherpa.transcribe(audio, lang)
+        return "" if text is None else _clean(text, None)
 
     if config.ASR_REMOTE:
         # Deliberately outside ``_infer_lock``: no CPU work happens here, so

@@ -268,6 +268,30 @@ ASR_REMOTE_ONLY = _env_flag("ECHONOTE_ASR_REMOTE_ONLY")
 # The combination that must surface as an error rather than a quiet fallback.
 ASR_REMOTE_MISCONFIGURED = ASR_REMOTE_ONLY and not ASR_REMOTE
 
+# --------------------------------------------------------------------------
+# Local streaming ASR (sherpa-onnx zipformer)
+# --------------------------------------------------------------------------
+#
+# A zipformer transducer is a purpose-built streaming ASR model, not a language
+# model: 161 MB int8, no decoder-side LLM, rtf around 0.1 on CPU. It trades
+# some accuracy on unusual vocabulary for a 20x lower CPU cost than
+# ``large-v3-turbo``, which is the whole reason it exists here.
+SHERPA_MODEL_DIR = os.getenv(
+    "ECHONOTE_SHERPA_DIR", str(Path(MODEL_DIR) / "sherpa-zipformer-zh")
+)
+# Two threads already runs at several times real time; more just fights the
+# browser for cores.
+SHERPA_THREADS = _env_int("ECHONOTE_SHERPA_THREADS", 2)
+
+# Which engine actually decodes: "whisper" (faster-whisper) or "sherpa"
+# (streaming zipformer). An explicit ECHONOTE_ASR_BACKEND wins; otherwise a
+# configured remote endpoint wins, then Whisper.
+ASR_BACKEND = (
+    os.getenv("ECHONOTE_ASR_BACKEND", "").strip().lower()
+    or ("remote" if ASR_REMOTE else "whisper")
+)
+
+
 
 
 # Peak normalisation, experimental and **off by default**.

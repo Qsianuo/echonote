@@ -360,6 +360,54 @@ WebSocket ──▶ FastAPI（每连接一会话）
 
 ---
 
+## ⚡ 本地流式识别（sherpa-onnx）
+
+默认引擎是 faster-whisper。它准，但 `large-v3-turbo` 是 1.6 GB 的通用模型，
+在 4 核 CPU 上实时因子约 2.5——转录 1 分钟录音要烧 2.5 分钟 CPU。
+
+**sherpa-onnx 的 zipformer transducer 是专用流式识别模型，不是语言模型**：
+161 MB int8、无解码器侧大模型、CPU 上实时因子 0.126（约 8 倍实时）。
+
+**安装**（模型不进仓库，需自行下载）：
+
+```bash
+pip install sherpa-onnx
+
+# 国内直连（GitHub releases 会跳转到 objects.githubusercontent.com，常被阻断）
+BASE=https://hf-mirror.com/csukuangfj/sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30/resolve/main
+mkdir -p models/sherpa-zipformer-zh && cd models/sherpa-zipformer-zh
+for f in encoder.int8.onnx decoder.onnx joiner.int8.onnx tokens.txt; do
+  curl -L -O "$BASE/$f"
+done
+```
+
+**启用**：
+
+```bash
+set ECHONOTE_ASR_BACKEND=sherpa
+start.bat
+```
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `ECHONOTE_ASR_BACKEND` | `whisper` | `whisper` / `sherpa` / `remote` |
+| `ECHONOTE_SHERPA_DIR` | `models/sherpa-zipformer-zh` | 模型目录 |
+| `ECHONOTE_SHERPA_THREADS` | `2` | 线程数；2 线程已远超实时 |
+
+**本机实测**（`docs/examples` 那段 8.9 秒、29 字样本）：
+
+| 引擎 | 耗时 | RTF | 结果 |
+|---|---|---|---|
+| sherpa zipformer | 1.12s | **0.126** | 逐字正确，简体，无幻觉 |
+| whisper base | 0.97s | 0.109 | 输出繁体，对照简体参考 CER 51.7% |
+| whisper large-v3-turbo | ~22s | 2.48 | 参考基线 |
+
+**取舍**：sherpa 在这段短样本上不输 Whisper，但它没有通用语言模型的词表广度，
+遇到人名、专业术语、生僻组合时更容易错。要「最后一分准确率」用 Whisper，
+要「CPU 不冒烟、边说边出字」用 sherpa。两者可随时用 `ECHONOTE_ASR_BACKEND` 切换。
+
+---
+
 ## ☁️ 远程识别（可选）
 
 本地 `large-v3-turbo` 在 4 核 CPU 上实时因子约 2.5——转录 1 分钟录音要 2.5 分钟 CPU 时间。若本机算力不够，可以把识别交给远程服务。

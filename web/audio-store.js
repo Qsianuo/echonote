@@ -96,9 +96,36 @@
         /* 内存实现无需刷盘 */
       },
 
+      /**
+       * 按字节区间取一段 PCM。直接从已持有的 chunk 切片，**不再经过 toBlob()**：
+       * 降级模式下录音全在内存里，一次 toBlob() 会把整段（60 min ≈ 180 MB）
+       * 重新拷一遍，而回放每 30 s 就要读一次，等于把内存峰值钉在录音全长上。
+       * 逐块按字节拷贝的语义与 OPFS 版 `file.slice()` 完全一致。
+       */
       async read(from, to) {
         assertReadable();
-        return (await store.toBlob()).slice(from, to).arrayBuffer();
+        const start = Math.max(0, Math.min(bytes, Math.floor(Number(from) || 0)));
+        const end = Math.max(start, Math.min(bytes, Math.floor(Number(to) || 0)));
+        const out = new Uint8Array(end - start);
+        let chunkStart = 0;
+        let written = 0;
+        for (const chunk of chunks) {
+          const chunkBytes = chunk.byteLength;
+          const chunkEnd = chunkStart + chunkBytes;
+          if (chunkEnd <= start) {
+            chunkStart = chunkEnd;
+            continue;
+          }
+          if (chunkStart >= end) break;
+          // Int16Array 只是写入时的载体；读出来一律按字节，保持与落盘字节一致。
+          const view = new Uint8Array(chunk.buffer, chunk.byteOffset, chunkBytes);
+          const fromInChunk = Math.max(0, start - chunkStart);
+          const toInChunk = Math.min(chunkBytes, end - chunkStart);
+          out.set(view.subarray(fromInChunk, toInChunk), written);
+          written += toInChunk - fromInChunk;
+          chunkStart = chunkEnd;
+        }
+        return out.buffer;
       },
 
       async toBlob() {

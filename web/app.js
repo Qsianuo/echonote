@@ -1706,6 +1706,11 @@
       source.connect(ctx.destination);
       source.onended = () => {
         state.playSources = state.playSources.filter((item) => item !== source);
+        try {
+          source.disconnect(); // 放完就摘掉，别让已结束的节点挂着 destination
+        } catch {
+          /* 已经断开过了 */
+        }
       };
 
       const startAt = sched.nextStartAt(ctx.currentTime);
@@ -1770,6 +1775,8 @@
       state.playSched.reset(state.playCtx.currentTime);
       state.playCtx.suspend().catch(() => {});
     }
+    // 停下来就不再「正在播这一句」：高亮只跟着播放态走。
+    highlightRow(null);
     updatePlayUI();
   }
 
@@ -1802,6 +1809,7 @@
     stopLoops();
     if (state.playCtx) state.playCtx.suspend().catch(() => {});
     updatePlayUI();
+    announce('已暂停');
   }
 
   async function resumePlayback() {
@@ -1816,6 +1824,7 @@
     startLoops();
     updatePlayUI();
     pump();
+    announce('继续播放');
   }
 
   async function startPlayback() {
@@ -1851,6 +1860,7 @@
     startLoops();
     updatePlayUI();
     await requestWindow(); // 首块不等 500 ms 的 pump，点下去就排
+    if (state.playState === 'playing') announce('开始播放');
   }
 
   function togglePlay() {
@@ -1946,12 +1956,13 @@
   }
 
   /**
-   * 空格归回放的判据：最近一次交互在播放条内；或者此刻正出声——正在播的时候
-   * 空格只能是暂停，绝不能变成「开始录音」。
+   * 空格归回放的判据：回放已激活（playing / paused / seeking 全算）或最近一次
+   * 交互落在播放条内。**暂停态必须算激活**：点字幕起播 → 空格暂停 → 再按空格，
+   * 若这里只看 playing，就会掉进 toggleRecording()，一边「暂停」一边开始录音。
    */
   function spaceGoesToPlayback() {
     if (!Playback || state.recording || playDurationS() <= 0) return false;
-    if (state.playState === 'playing' || state.playState === 'seeking') return true;
+    if (state.playState !== 'idle') return true;
     return state.playInteracted;
   }
 
@@ -1966,10 +1977,12 @@
       state.playScrub = true;
       renderPlayTime(Number(el.playSeek.value));
     });
+    // 拖动松手后一律从新位置开始播（含原来处于暂停/未播的情况）：拖动进度条
+    // 本身就是「我要听这一段」，停在暂停态等于没有反馈。
     el.playSeek.addEventListener('change', () => {
       const value = Number(el.playSeek.value);
       state.playScrub = false;
-      seekTo(value);
+      seekTo(value, { play: true });
     });
 
     // 「最近一次交互在播放条内」：捕获阶段记，早于任何 click。
@@ -1981,12 +1994,19 @@
       true
     );
 
-    // 点字幕行＝跳到该句开头并开始播。
+    // 点字幕行＝跳到该句开头并开始播。先判能不能播：不能播就只提示、不高亮，
+    // 否则行亮了却没跳，是假反馈。
     el.finals.addEventListener('click', (event) => {
       const row = event.target.closest ? event.target.closest('.segment') : null;
-      if (!row || !el.finals.contains(row) || playDurationS() <= 0) return;
+      if (!row || !el.finals.contains(row)) return;
       const item = state.finals.find((entry) => entry.id === row.dataset.id);
       if (!item) return;
+      if (state.recording || playDurationS() <= 0) {
+        const text = state.recording ? '录音结束后才能回放' : '还没有可回放的音频';
+        setHint(text);
+        announce(text);
+        return;
+      }
       highlightRow(item.id);
       seekTo(item.start, { play: true });
     });

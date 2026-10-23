@@ -110,6 +110,25 @@ test('silence stays silent: hiss is not amplified into words', () => {
   assert.equal(peakOf(out), 0);
 });
 
+test('room tone below the speech floor is left at unity', () => {
+  // -50 dBFS hiss: audible to a person, useless to a recogniser, and loud
+  // enough to trip the VAD's 0.010 RMS gate if it were multiplied by four.
+  const Processor = loadWorklet();
+  const out = run(new Processor(), sine(0.003, 1.0, 16000, 4000));
+  const peak = peakOf(out) / FULL;
+  assert.ok(peak < 0.0045, `room tone was amplified: peak ${peak.toFixed(4)}`);
+});
+
+test('gain relaxes back to unity during a pause', () => {
+  const Processor = loadWorklet();
+  const processor = new Processor();
+  run(processor, sine(0.05, 0.3)); // quiet speech lifts the gain
+  const lifted = processor.gain;
+  assert.ok(lifted > 2, `gain should have risen, got ${lifted.toFixed(2)}`);
+  run(processor, sine(0.002, 0.5, 16000, 4000)); // pause
+  assert.ok(processor.gain < 1.3, `gain should relax, got ${processor.gain.toFixed(2)}`);
+});
+
 test('gain never drops below unity, even right after a loud transient', () => {
   const Processor = loadWorklet();
   const processor = new Processor();

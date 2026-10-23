@@ -18,9 +18,14 @@
 const TARGET_PEAK = 0.5; // -6 dBFS: loud enough to hear, far from clipping
 const MAX_GAIN = 4; // +12 dB: past this the hiss wins more than the voice
 const CEILING = 0.95; // hard stop before the Int16 conversion wraps around
-const SILENCE_PEAK = 1e-4; // below this the block carries no voice at all
+// -45 dBFS. Below this a block is room noise, not a voice: a hiss at -50 dBFS
+// is peak 0.003, quiet speech is nearer 0.05. Amplifying noise here would lift
+// the floor above the VAD's 0.010 RMS gate, the segmenter would start treating
+// every pause as speech, and the decoder would run non-stop on nothing.
+const NO_GAIN_PEAK = 0.0056;
 const RISE = 0.12; // per native block; ~30 ms to settle at a quieter level
 const FALL = 1.0; // instant: one transient must not push the next block over
+const RELAX = 0.05; // per block back to unity while nothing is being said
 
 class PCM16Processor extends AudioWorkletProcessor {
   constructor() {
@@ -34,10 +39,14 @@ class PCM16Processor extends AudioWorkletProcessor {
 
   /** Move the gain toward what this block needs, asymmetric on purpose. */
   updateGain(blockPeak) {
-    if (blockPeak > SILENCE_PEAK) {
+    if (blockPeak > NO_GAIN_PEAK) {
       const wanted = Math.min(MAX_GAIN, Math.max(1, TARGET_PEAK / blockPeak));
       const k = wanted < this.gain ? FALL : RISE;
       this.gain += (wanted - this.gain) * k;
+    } else {
+      // Nothing but room tone: slide back to unity so a pause between two
+      // sentences is not recorded 12 dB louder than the room actually is.
+      this.gain += (1 - this.gain) * RELAX;
     }
     if (!(this.gain >= 1)) this.gain = 1; // NaN guard, and never attenuate
     if (this.gain > MAX_GAIN) this.gain = MAX_GAIN;

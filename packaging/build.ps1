@@ -8,7 +8,7 @@
 # hard to spot.
 
 param(
-    [string]$Version = "0.12.0",
+    [string]$Version = "0.12.1",
     [switch]$SkipTest,
     [string]$Python = "python"
 )

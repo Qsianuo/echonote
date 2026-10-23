@@ -8,7 +8,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![Whisper](https://img.shields.io/badge/faster--whisper-local%20STT-412991?style=flat-square&logo=openai&logoColor=white)](https://github.com/SYSTRAN/faster-whisper)
 [![License](https://img.shields.io/badge/License-MIT-64ffda?style=flat-square)](LICENSE)
-[![Stage](https://img.shields.io/badge/stage-v0.12.0%20tech%20preview-f0b429?style=flat-square)](#-延迟口径重要)
+[![Stage](https://img.shields.io/badge/stage-v0.12.1%20tech%20preview-f0b429?style=flat-square)](#-延迟口径重要)
 
 边说边出字 · 录音不上传 · 装好模型后完全离线 · 支持中英日韩等多语言
 
@@ -16,7 +16,7 @@
 
 ---
 
-> **这是 v0.12.0 技术预览（tech preview），不是 v1.0.0。**
+> **这是 v0.12.1 技术预览（tech preview），不是 v1.0.0。**
 > 三件事需要先说清楚：**实验性**；**延迟取决于硬件**（本机实测首字 2.8 s、停顿后 1 s 出定稿、约 12 s 完成精修，见下文口径）；**首次准备要下载两个模型**（145 MB + 1.5 GB），之后可完全断网运行。
 
 ---

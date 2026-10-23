@@ -1,7 +1,7 @@
 # GATE-0 文档一致性清单
 
 > 用途：PRD v1.1 §15.2 GATE-0 的证据物。每一项都必须能用命令复现，**不接受“我看过了”**。
-> 代码基线：本次实现（文档 v1.1 + 产品 v0.12.0 tech preview）。
+> 代码基线：本次实现（文档 v1.1 + 产品 v0.12.1 tech preview）。
 
 ## 0. 断言口径说明（一处 PRD 内部冲突的处理）
 
@@ -23,7 +23,7 @@ grep -rn "3\.9+" README.md start.bat run.sh app/     # 必须为空
 | 2 | 不写“1–2 秒”延迟承诺 | `grep -rn "1–2 秒\|1-2 秒" README.md web/` | 空 | ✅ 空（改为 A/B/C 分档 p95） |
 | 3 | Worklet 分片口径正确 | `grep -rn "40–90 ms\|40-90 ms" README.md web/` | 空 | ✅ 空（实际 8 ms/块，上行合并到 100 ms） |
 | 4 | 导出数量口径 | `grep -rn "三种文本导出" README.md` | 空 | ✅ 空（四种导出：TXT/MD/SRT/WAV） |
-| 5 | 产品版本号与阶段一致 | `grep -rn "version=" app/main.py` | `config.APP_VERSION` | ✅ `version=config.APP_VERSION` → `0.12.0`（阶段仍 `tech-preview`） |
+| 5 | 产品版本号与阶段一致 | `grep -rn "version=" app/main.py` | `config.APP_VERSION` | ✅ `version=config.APP_VERSION` → `0.12.1`（阶段仍 `tech-preview`） |
 | 6 | 前端不以 health 做门控 | `grep -rn "api/health" web/` | 空 | ✅ 空（只用 `/api/ready`） |
 | 7 | VAD 取整已披露 | `grep -n "900 ms" README.md` | 命中 | ✅ README 配置表：900 → 实际 900 ms |
 | 8 | 最短语音已披露 | `grep -n "240 ms" README.md` | 命中 | ✅ README 配置表：240 → 实际 240 ms |
@@ -60,7 +60,7 @@ grep -rn "3\.9+" README.md start.bat run.sh app/     # 必须为空
 | 项 | 状态 | 处置 |
 |----|------|------|
 | `docs/screenshot.png` 仍是旧界面 | 待重出 | 图为 v0.10/v0.11 时期，**缺 v0.12 的播放条**（进度、播放/暂停、当前句高亮），也缺导出菜单焦点态与 90 分钟提示。发布前按 GATE-0 第 7 项重出截图，取「停止后 + 回放中」两态 |
-| 文档版本 v1.1 ≠ 产品版本 v0.12.0 | 已按 D-02/§0.2 分离 | 对外只写 `v0.12.0 tech preview` |
+| 文档版本 v1.1 ≠ 产品版本 v0.12.1 | 已按 D-02/§0.2 分离 | 对外只写 `v0.12.1 tech preview` |
 | `on_event("startup")` 弃用 | 已修 | 改用 `lifespan`（原 NFR-CI-04 债务项之一） |
 | 无 `pyproject.toml` / lint / 类型检查 | 未处理 | 保留在 Backlog（P2） |
 

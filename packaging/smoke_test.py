@@ -85,6 +85,9 @@ def run_server(exe: Path) -> None:
             "ECHONOTE_PORT": PORT,
             "ECHONOTE_NO_BROWSER": "1",
             "ECHONOTE_SKIP_PRELOAD": "1",  # never download a model in CI
+            # The desktop shell exits on its own once no UI has been attached
+            # for a while; a headless smoke test never attaches one.
+            "ECHONOTE_NO_IDLE_EXIT": "1",
         }
     )
     proc = subprocess.Popen([str(exe)], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)

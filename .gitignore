@@ -47,3 +47,10 @@ docs/session-context-*.md
 
 # superpowers SDD 工作区（计划/台账等临时产物）
 .superpowers/
+
+# Local build output for desktop-shell checks
+dist_p0/
+build_p0/
+
+# Desktop shell log file (dev runs write it next to the repo root)
+logs/

@@ -267,6 +267,39 @@ ASR_REMOTE_COOLDOWN_S = _env_float("ECHONOTE_ASR_REMOTE_COOLDOWN_S", 30.0)
 # so a half-filled config silently stays local instead of failing every call.
 ASR_REMOTE = bool(ASR_REMOTE_URL and ASR_REMOTE_KEY)
 
+
+def _sticky_backend() -> str:
+    """The engine the user last asked for, remembered across restarts.
+
+    Same reasoning as ``_sticky_choice`` for the model dropdown, but the stakes
+    are higher: an explicit "run this on the server" that evaporates on the
+    next restart does not just reset a dropdown, it puts the CPU back on local
+    inference while the user believes the work was offloaded. The env var
+    still wins — it is the operator's override, the file is the preference.
+    """
+    path = Path(MODEL_DIR) / "asr-backend.txt"
+    try:
+        return path.read_text(encoding="utf-8").strip().lower()
+    except OSError:
+        return ""
+
+
+_BACKEND_CHOICE = os.getenv("ECHONOTE_ASR_BACKEND", "").strip().lower() or _sticky_backend()
+
+
+def remember_backend(name: str | None) -> None:
+    """Persist the backend choice so a restart does not undo it."""
+    path = Path(MODEL_DIR) / "asr-backend.txt"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if name:
+            path.write_text(name.strip().lower() + "\n", encoding="utf-8")
+        elif path.exists():
+            path.unlink()
+    except OSError:
+        log.warning("Could not persist the backend choice to %s", path)
+
+
 # Strict mode: never fall back to the local model, and refuse to start
 # recognition when the remote backend is not configured.
 #
@@ -275,7 +308,7 @@ ASR_REMOTE = bool(ASR_REMOTE_URL and ASR_REMOTE_KEY)
 # being recognised on the machine they were trying to offload. Silent
 # degradation is the wrong default when the whole point of the switch is "do
 # not run this locally".
-ASR_REMOTE_ONLY = _env_flag("ECHONOTE_ASR_REMOTE_ONLY")
+ASR_REMOTE_ONLY = _env_flag("ECHONOTE_ASR_REMOTE_ONLY") or _BACKEND_CHOICE == "remote"
 # The combination that must surface as an error rather than a quiet fallback.
 ASR_REMOTE_MISCONFIGURED = ASR_REMOTE_ONLY and not ASR_REMOTE
 
@@ -294,13 +327,12 @@ SHERPA_MODEL_DIR = os.getenv(
 # browser for cores.
 SHERPA_THREADS = _env_int("ECHONOTE_SHERPA_THREADS", 2)
 
-# Which engine actually decodes: "whisper" (faster-whisper) or "sherpa"
-# (streaming zipformer). An explicit ECHONOTE_ASR_BACKEND wins; otherwise a
-# configured remote endpoint wins, then Whisper.
-ASR_BACKEND = (
-    os.getenv("ECHONOTE_ASR_BACKEND", "").strip().lower()
-    or ("remote" if ASR_REMOTE else "whisper")
-)
+# Which engine actually decodes: "whisper" (faster-whisper), "sherpa"
+# (streaming zipformer) or "remote" (OpenAI-compatible endpoint). Explicit env
+# wins, then the user's remembered choice, then a configured remote endpoint,
+# then Whisper. Persisting the choice matters: without it a restart silently
+# reverts to local inference while the UI still says what the user picked.
+ASR_BACKEND = _BACKEND_CHOICE or ("remote" if ASR_REMOTE else "whisper")
 
 
 

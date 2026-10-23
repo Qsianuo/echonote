@@ -104,6 +104,44 @@ def bmp_payload(size: int) -> bytes:
     return header + pixels + mask
 
 
+def png_bytes(size: int) -> bytes:
+    """RGBA PNG for the web app manifest, which cannot use an .ico."""
+    import zlib
+
+    top_down = render(size)
+    rows = []
+    for y in range(size):
+        row = bytearray([0])  # filter type 0 (None)
+        base = y * size * 4
+        for x in range(size):
+            offset = base + x * 4
+            b, g, r, a = (
+                top_down[offset],
+                top_down[offset + 1],
+                top_down[offset + 2],
+                top_down[offset + 3],
+            )
+            row += bytes((r, g, b, a))
+        rows.append(bytes(row))
+    raw = b"".join(rows)
+
+    def chunk(tag: bytes, payload: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(payload))
+            + tag
+            + payload
+            + struct.pack(">I", zlib.crc32(tag + payload) & 0xFFFFFFFF)
+        )
+
+    header = struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0)  # 8-bit RGBA
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", header)
+        + chunk(b"IDAT", zlib.compress(raw, 9))
+        + chunk(b"IEND", b"")
+    )
+
+
 def build(path: Path) -> None:
     images = [(size, bmp_payload(size)) for size in SIZES]
     count = len(images)
@@ -133,6 +171,15 @@ def build(path: Path) -> None:
 
 
 if __name__ == "__main__":
-    target = Path(__file__).resolve().parent / "echonote.ico"
+    here = Path(__file__).resolve().parent
+    target = here / "echonote.ico"
     build(target)
     print(f"wrote {target} ({target.stat().st_size} bytes, {len(SIZES)} sizes)")
+
+    # The web app manifest cannot reference an .ico, so the two sizes Chrome
+    # and Edge ask for are emitted alongside it.
+    web = here.parent / "web"
+    for size in (192, 512):
+        png = web / f"icon-{size}.png"
+        png.write_bytes(png_bytes(size))
+        print(f"wrote {png} ({png.stat().st_size} bytes)")

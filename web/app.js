@@ -939,7 +939,7 @@
       });
     } catch (error) {
       showError(`无法访问麦克风：${friendlyMediaError(error)}`);
-      setHint('麦克风不可用，请在系统设置中允许麦克风');
+      setHint(permissionHint(error));
       announce('麦克风不可用');
       await releaseStore(); // 不留悬挂的 Worker / 句柄
       return;
@@ -1164,6 +1164,27 @@
     if (error.name === 'NotFoundError') return '没有找到麦克风设备';
     if (error.name === 'NotReadableError') return '麦克风被其他程序占用';
     return error.message || error.name;
+  }
+
+  /**
+   * Where the user actually has to click.
+   *
+   * "请在系统设置中允许麦克风" was wrong half the time: inside the installed
+   * window there is no address bar to click, and in a plain tab the Windows
+   * privacy switch is not what is blocking it. The two cases need different
+   * instructions, and only one of them is a browser setting.
+   */
+  function permissionHint(error) {
+    if (!error || error.name !== 'NotAllowedError') {
+      return '麦克风不可用，请检查设备连接后重试';
+    }
+    const installed =
+      window.matchMedia('(display-mode: standalone)').matches ||
+      window.matchMedia('(display-mode: window-controls-overlay)').matches ||
+      navigator.standalone === true;
+    return installed
+      ? '麦克风被拒绝：到「设置 → 隐私和安全性 → 麦克风」允许 EchoNote，再点重试'
+      : '麦克风被拒绝：点地址栏左侧的图标，把麦克风改成「允许」，再点重试';
   }
 
   /* ─────────────────────────── audio pipeline ─────────────────────────── */

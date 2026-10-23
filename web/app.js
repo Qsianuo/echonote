@@ -929,7 +929,12 @@
           channelCount: 1,
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true,
+          // Off on purpose: the worklet applies its own bounded gain
+          // (amplify-only, ≤ +12 dB, peak target −6 dBFS). Chrome's AGC is
+          // tuned for calls and attenuates as readily as it boosts, which is
+          // why a recording made near a fan came out quiet. Two AGCs in
+          // series also fight each other, so only one is allowed.
+          autoGainControl: false,
         },
       });
     } catch (error) {

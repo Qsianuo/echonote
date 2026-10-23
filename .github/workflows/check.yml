@@ -63,9 +63,9 @@ jobs:
           node --check web/wav.js
           node --check web/pcm-worklet.js
 
-      # RG-03 (WAV header) + RG-15 (export golden samples).
+      # RG-03 (WAV header) + RG-15 (export golden samples) + RG-41 (input gain).
       - name: Frontend unit tests
-        run: node --test tests/js/export.test.mjs tests/js/wav.test.mjs
+        run: node --test tests/js/export.test.mjs tests/js/wav.test.mjs tests/js/pcm-worklet.test.mjs
 
   runtime:
     name: runtime imports

@@ -163,10 +163,10 @@ test('gain relaxes back to unity during a long pause', () => {
   assert.ok(processor.gain < 1.3, `gain should relax, got ${processor.gain.toFixed(2)}`);
 });
 
-test('gain never leaves the [1, 16] range', () => {
+test('gain never leaves the [1, 32] range', () => {
   const Processor = loadWorklet();
   const processor = new Processor();
   run(processor, utterance({ speechPeak: 1.0, gapPeak: 0.001 }));
   run(processor, utterance({ speechPeak: 0.0001, gapPeak: 0.00001 }));
-  assert.ok(processor.gain >= 1 && processor.gain <= 16, `gain out of range: ${processor.gain}`);
+  assert.ok(processor.gain >= 1 && processor.gain <= 32, `gain out of range: ${processor.gain}`);
 });

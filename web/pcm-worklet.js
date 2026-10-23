@@ -19,8 +19,8 @@
  * the floor block by block separates the two cases on the only evidence
  * available: whether a block stands above what the room is already doing.
  */
-const TARGET_PEAK = 0.7; // -3 dBFS: as hot as it can go without clipping
-const MAX_GAIN = 16; // +24 dB: enough for a distant or low-gain microphone
+const TARGET_PEAK = 0.8; // -1.9 dBFS: only the ceiling is left above it
+const MAX_GAIN = 32; // +30 dB: for a microphone that barely registers a voice
 const CEILING = 0.95; // hard stop before the Int16 conversion wraps around
 // Absolute floor. Even in a silent room the converter dithers around -66 dBFS;
 // below that there is nothing to scale and the gain stays at unity.

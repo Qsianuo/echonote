@@ -350,9 +350,15 @@ def load() -> bool:
                     return False
                 log.info("Model %s not on disk, one-time download allowed", target.key)
 
-            # Blocks any accidental hub call from inside faster-whisper. Set
-            # before the import so the library picks it up at module load.
-            models.apply_offline_env()
+            # Offline env only when the weights are already here. Setting it in
+            # the branch above — the one that just decided a one-time download
+            # is allowed — made that download impossible: the hub client
+            # answered OfflineModeIsEnabled for a machine that was plainly
+            # online, which is precisely the error a fresh install used to hit.
+            if target.path is not None:
+                models.apply_offline_env()
+            else:
+                models.apply_online_env()
 
             from faster_whisper import WhisperModel
 

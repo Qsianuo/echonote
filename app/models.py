@@ -334,3 +334,15 @@ def offline_env() -> dict[str, str]:
 def apply_offline_env() -> None:
     for key, value in offline_env().items():
         os.environ.setdefault(key, value)
+
+
+def apply_online_env() -> None:
+    """Undo :func:`apply_offline_env` before an authorised one-time download.
+
+    ``setdefault`` means a flag left over from an earlier load survives, and
+    the hub client then refuses the very download the caller just decided to
+    allow — ``OfflineModeIsEnabled`` on a machine that is plainly online.
+    Popping is the only way back in the same process.
+    """
+    for key in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE"):
+        os.environ.pop(key, None)

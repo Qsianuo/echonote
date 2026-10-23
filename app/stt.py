@@ -137,6 +137,25 @@ def live_target() -> models.Target:
     return main
 
 
+def live_backend() -> str:
+    """Which engine draws the live caption: ``"sherpa"``, ``"whisper"`` or ``"remote"``.
+
+    Separate from ``config.ASR_BACKEND`` on purpose. Sending the whole pipeline
+    to a remote endpoint is a reasonable trade for the final text and a bad one
+    for the caption: the caption re-uploads a growing buffer every step, so it
+    costs dozens of requests per sentence. When the final path is remote and
+    the streaming zipformer is installed, the caption uses it instead — 161 MB,
+    no network, ~20x cheaper than large-v3-turbo.
+    """
+    if config.ASR_BACKEND == "sherpa":
+        return "sherpa"
+    if config.ASR_LIVE_REMOTE:
+        return "remote"
+    if config.ASR_BACKEND == "remote" and asr_sherpa.is_installed():
+        return "sherpa"
+    return "whisper"
+
+
 def live_is_separate() -> bool:
     """True when the live caption model is not the final model."""
     if config.ASR_BACKEND == "sherpa":
@@ -145,6 +164,10 @@ def live_is_separate() -> bool:
         # models that are not even loaded — and "refine" would then re-decode
         # every utterance with the same weights it was just decoded with.
         return False
+    if live_backend() == "sherpa":
+        # Hybrid: two genuinely different engines, so a second pass is a real
+        # second pass rather than the same weights run twice.
+        return True
     main = config.model_target()
     live = live_target()
     if live.key != main.key:
@@ -163,8 +186,21 @@ def load_live() -> bool:
     """
     global _live_model, _live_key, _live_error
 
-    if config.ASR_BACKEND == "sherpa":
+    mode = live_backend()
+
+    if mode == "sherpa":
         # One streaming recognizer serves both the live and the final role.
+        if config.ASR_BACKEND != "sherpa" and not asr_sherpa.is_loaded():
+            # Hybrid: the final path is remote, so nothing else has loaded the
+            # recognizer yet. Loading here keeps the caption working even
+            # though the final transcript will never touch these weights.
+            if not asr_sherpa.load():
+                with _live_load_lock:
+                    _live_model = None
+                    _live_key = asr_sherpa.label()
+                    _live_error = "sherpa 模型未就绪：请检查 models/sherpa-zipformer-zh 下的四个文件"
+                    _live_ready.set()
+                return False
         with _live_load_lock:
             _live_model = None
             _live_key = asr_sherpa.label()
@@ -172,7 +208,7 @@ def load_live() -> bool:
             _live_ready.set()
         return True
 
-    if config.ASR_REMOTE:
+    if mode == "remote":
         # The live model would never run, so loading 145 MB of weights for it
         # is pure waste — and the whole point of the switch is to stop paying
         # that cost.
@@ -582,6 +618,24 @@ def status() -> dict:
         result["live_model_label"] = "sherpa 流式"
         result["rtf"] = None
         result["offline_ready"] = asr_sherpa.is_installed()
+    elif config.ASR_REMOTE and live_backend() == "sherpa":
+        # Hybrid: the final text comes from the endpoint, the caption from the
+        # local streaming model. The local whisper names describe neither, and
+        # reporting one name for a two-engine pipeline is how the picker ended
+        # up telling the user something that was not running.
+        result.update(asr_remote.status())
+        result["backend"] = "remote"
+        result["model"] = config.ASR_REMOTE_MODEL
+        result["model_key"] = "remote"
+        result["model_label"] = "远程"
+        result["live_model"] = asr_sherpa.label()
+        result["live_model_key"] = "sherpa"
+        result["live_model_label"] = "本地流式"
+        result["live_separate"] = True
+        result["rtf"] = None
+        # The final text still needs the network, so the offline promise does
+        # not hold even though the caption is local.
+        result["offline_ready"] = False
     elif config.ASR_REMOTE:
         # The local model names are meaningless here: nothing was loaded, and
         # reporting "base" while an HTTP call does the work would send anyone
@@ -743,11 +797,13 @@ def transcribe_live(
     lang = None if not language or language == "auto" else language
     audio = _prepare(audio)
 
-    if config.ASR_BACKEND == "sherpa":
+    mode = live_backend()
+
+    if mode == "sherpa":
         text = asr_sherpa.transcribe(audio, lang, hotwords=hotwords or config.HOTWORDS)
         return "" if text is None else _clean(text, None)
 
-    if config.ASR_REMOTE:
+    if mode == "remote":
         remote = asr_remote.transcribe(audio, lang, live=True)
         if remote is not None:
             # No prompt was sent, so there is nothing to strip an echo of.
@@ -756,6 +812,12 @@ def transcribe_live(
             # Strict mode: a failed remote call produces no caption. Falling
             # back would put the audio on the CPU the user asked us to spare.
             return ""
+
+    if config.ASR_REMOTE_ONLY:
+        # Never reached while the mode resolution above is honest; kept so a
+        # future edit cannot quietly start running inference the operator
+        # explicitly switched off.
+        return ""
 
     if config.ASR_REMOTE_ONLY and not config.ASR_REMOTE:
         return ""  # pinned to remote, but not configured — see stt.load()

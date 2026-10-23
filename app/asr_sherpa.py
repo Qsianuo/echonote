@@ -66,6 +66,16 @@ def is_installed() -> bool:
     return all((directory / name).is_file() for name in _FILES)
 
 
+def is_loaded() -> bool:
+    """True when the recognizer is already built.
+
+    Separate from :func:`is_installed`: the files being present says nothing
+    about whether the 161 MB build has happened, and a caller that only needs
+    to avoid rebuilding twice has to ask this one.
+    """
+    return _recognizer is not None
+
+
 def load() -> bool:
     """Build the recognizer. Returns True when it is usable."""
     global _recognizer

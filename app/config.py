@@ -308,7 +308,10 @@ def remember_backend(name: str | None) -> None:
 # being recognised on the machine they were trying to offload. Silent
 # degradation is the wrong default when the whole point of the switch is "do
 # not run this locally".
-ASR_REMOTE_ONLY = _env_flag("ECHONOTE_ASR_REMOTE_ONLY") or _BACKEND_CHOICE == "remote"
+_STRICT_ENV = _env_flag("ECHONOTE_ASR_REMOTE_ONLY")
+_PINNED_REMOTE = _BACKEND_CHOICE == "remote"
+
+ASR_REMOTE_ONLY = _STRICT_ENV or _PINNED_REMOTE
 # The combination that must surface as an error rather than a quiet fallback.
 ASR_REMOTE_MISCONFIGURED = ASR_REMOTE_ONLY and not ASR_REMOTE
 
@@ -333,6 +336,27 @@ SHERPA_THREADS = _env_int("ECHONOTE_SHERPA_THREADS", 2)
 # then Whisper. Persisting the choice matters: without it a restart silently
 # reverts to local inference while the UI still says what the user picked.
 ASR_BACKEND = _BACKEND_CHOICE or ("remote" if ASR_REMOTE else "whisper")
+
+# Live captions stay local even when the final transcript goes remote.
+#
+# This is structural, not cosmetic. The live path re-uploads the growing
+# buffer every LIVE_STEP_S, so one utterance sends the same audio dozens of
+# times: at the ~46 requests/minute this pipeline actually produces, a
+# 2000-request/day free tier is gone in about 43 minutes and the upstream
+# traffic is O(n^2). Keeping the caption local also means a slow or blocked
+# endpoint degrades the final text instead of the thing the user is watching,
+# and it removes the 6 s stall before the fallback fires.
+#
+# Strict mode overrides it: "never run here" has to mean never.
+#
+# Two different switches, deliberately not the same one:
+#
+# * ``ECHONOTE_ASR_REMOTE_ONLY=1`` is an operator statement — no inference on
+#   this machine at all, caption included — so it forces the caption remote.
+# * Pinning ``remote`` in ``models/asr-backend.txt`` only says where the final
+#   text comes from. A local caption is a preview that the final replaces, not
+#   the transcript, so it stays on the cheap local model.
+ASR_LIVE_REMOTE = _env_flag("ECHONOTE_ASR_LIVE_REMOTE") or _STRICT_ENV
 
 
 

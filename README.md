@@ -436,10 +436,24 @@ start.bat
 
 **建议同时打开 `ECHONOTE_ASR_REMOTE_ONLY=1`**：否则远程失败时会静默回落本地，CPU 又被打满，而界面仍显示远程。打开后失败会明确报错，`/api/ready` 的 `error` 会说明原因。
 
+### 实时字幕默认留在本地（混合模式）
+
+远程识别只接管**定稿**，实时字幕仍由本机 `sherpa` 流式模型出字。这不是图省事，是结构性的：实时字幕每 `LIVE_STEP_S`（默认 0.6 秒）就要把**整段增长中的缓冲**重传一次，一句话会被上传几十遍。实测约 46 次/分钟，2000 次/日的免费额度大约 **43 分钟**就烧完，上行流量还是 O(n²)。字幕留在本地还有个好处：远端慢或挂掉时，受影响的是定稿，不是你正在看的字。
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `ECHONOTE_ASR_LIVE_REMOTE` | `0` | 设为 `1` 才让实时字幕也走远程 |
+| `ECHONOTE_ASR_REMOTE_ONLY` | `0` | 设为 `1` 时强制上一条打开——「本机不跑推理」必须包括字幕 |
+
+- 把 `remote` 写进 `models/asr-backend.txt` **不会**把字幕送上网络，只切定稿
+- 混合模式需要 `models/sherpa-zipformer-zh` 在位；缺了会退回本地 whisper 出字幕
+- 只想要远程定稿、本机又没装 sherpa：仍然可用，只是字幕会慢一些
+
 **行为**
 
-- 远程失败或熔断期间，自动回退到本地模型（前提是本地模型已加载）
-- 远程模式下不再加载本地权重，CPU 占用接近空载
+- 定稿走远程，字幕走本地 `sherpa`；`/api/ready` 里 `backend=remote`、`live_model_key=sherpa`、`live_separate=true`
+- 远程失败或熔断期间，定稿回退到本地模型（前提是本地模型已加载）
+- 纯远程模式（`ECHONOTE_ASR_LIVE_REMOTE=1`）下不再加载本地权重，CPU 占用接近空载
 - `GET /api/ready` 的 `backend` 字段为 `remote`，`remote_cooldown_s` 表示熔断剩余秒数
 - `offline_ready` 会变成 `false`——远程模式依赖网络，这是如实反映
 

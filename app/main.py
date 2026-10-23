@@ -246,6 +246,16 @@ def get_config() -> dict:
             live_separate=False,
             refine=False,
         )
+    elif config.ASR_REMOTE and stt.live_backend() == "sherpa":
+        # Hybrid: remote finals, local caption. The whisper names in the
+        # payload would describe a model that is not loaded, and the picker
+        # would then disagree with what the pipeline actually runs.
+        payload.update(
+            live_model=asr_sherpa.label(),
+            live_model_key="sherpa",
+            live_model_label="本地流式",
+            live_separate=True,
+        )
     return payload
 
 

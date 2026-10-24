@@ -8,7 +8,7 @@
   "scope": "/",
   "display": "standalone",
   "display_override": ["window-controls-overlay", "standalone"],
-  "orientation": "landscape",
+  "orientation": "any",
   "background_color": "#060d1a",
   "theme_color": "#060d1a",
   "categories": ["productivity", "utilities"],

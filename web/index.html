@@ -2,7 +2,7 @@
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>EchoNote 声记 · 本地实时录音转写</title>
     <meta
       name="description"
@@ -16,8 +16,12 @@
     <link rel="manifest" href="manifest.json" />
     <meta name="theme-color" content="#060d1a" />
     <meta name="color-scheme" content="dark" />
-    <link rel="apple-touch-icon" href="icon-192.png" />
-    <link rel="stylesheet" href="style.css" />
+    <!-- iOS 添加到主屏幕：独立窗口 + 状态栏配色（manifest 之外的老式标记，
+         旧版 Safari 只认这两个）。 -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="apple-touch-icon" href="icon-512.png" />
+    <link rel="stylesheet" href="style.css?v=20261024i" />
   </head>
   <body>
     <div class="bg-grid" aria-hidden="true"></div>
@@ -59,15 +63,27 @@
         </div>
 
         <div class="recorder">
-          <button id="record-btn" class="record-btn" disabled aria-label="开始录音">
-            <svg class="icon-mic" viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
-              <rect x="9" y="2.5" width="6" height="11" rx="3" />
-              <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7" />
-            </svg>
-            <svg class="icon-stop" viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true">
-              <rect x="6.5" y="6.5" width="11" height="11" rx="2.2" />
-            </svg>
-          </button>
+          <div class="recorder-controls">
+            <button id="record-btn" class="record-btn" disabled aria-label="开始录音">
+              <svg class="icon-mic" viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+                <rect x="9" y="2.5" width="6" height="11" rx="3" />
+                <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7" />
+              </svg>
+              <svg class="icon-stop" viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true">
+                <rect x="6.5" y="6.5" width="11" height="11" rx="2.2" />
+              </svg>
+            </button>
+            <button id="pause-btn" class="pause-btn" disabled aria-label="暂停录音" title="暂停录音">
+              <svg class="icon-pause" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+                <rect x="7" y="5.5" width="3.4" height="13" rx="1.2" />
+                <rect x="13.6" y="5.5" width="3.4" height="13" rx="1.2" />
+              </svg>
+              <svg class="icon-play" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+                <path d="M8.5 5.5v13l10.5-6.5z" />
+              </svg>
+              <span class="pause-label">暂停</span>
+            </button>
+          </div>
           <div class="timer" id="timer">00:00</div>
           <div class="hint" id="hint">正在准备模型…</div>
         </div>
@@ -79,6 +95,14 @@
             <span>识别语言</span>
             <select id="language" disabled>
               <option value="auto">自动识别</option>
+            </select>
+          </label>
+
+          <label class="field" for="mode-select">
+            <span>录入情境</span>
+            <select id="mode-select" disabled>
+              <option value="personal">个人模式 · 近讲低延迟</option>
+              <option value="meeting">会议模式 · 远场抗噪</option>
             </select>
           </label>
 
@@ -194,7 +218,7 @@
         </div>
 
         <div class="panel-foot">
-          <span><kbd>空格</kbd> 开始 / 停止 · 播放条内 <kbd>空格</kbd> 播放 / 暂停</span>
+          <span><kbd>空格</kbd> 开始 / 停止录音 · 录完停止后 <kbd>空格</kbd> 播放 / 暂停</span>
           <span>模型 <b id="footer-model">medium</b><span id="footer-backend"> · 本地推理</span></span>
         </div>
       </section>
@@ -232,6 +256,11 @@
     <script src="audio-store.js"></script>
     <script src="waveform.js"></script>
     <script src="playback.js"></script>
-    <script src="app.js"></script>
+    <!-- 原生壳适配（ES 模块）：解析完成后、DOMContentLoaded 前执行，
+         检测到 Capacitor 才拦截 fetch/WebSocket；桌面环境加载等于空操作。
+         必须在 app.js 的 boot() 之前生效——所以 boot 挂在
+         DOMContentLoaded 上。 -->
+    <script type="module" src="native-boot.js?v=20261024i"></script>
+    <script src="app.js?v=20261024i"></script>
   </body>
 </html>

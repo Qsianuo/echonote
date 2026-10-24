@@ -5,6 +5,9 @@
   const SAMPLE_RATE = 16000;
   const MERGE_SAMPLES = 1600; // 100 ms upstream frame (PRD D-06 / FR-038)
   const PROTOCOL_VERSION = '4';
+  // 静态资源版本号：与 index.html 里 style.css / app.js 的 ?v= 保持一致。
+  // 改动前端文件时同步递增，浏览器才会重新拉取（worklet 模块同样受缓存）。
+  const ASSET_VERSION = '20261024i';
   const RECONNECT_BASE_MS = 1500;
   const RECONNECT_MAX_MS = 15000;
   const RECONNECT_ATTEMPTS_CAP = 4;
@@ -37,6 +40,8 @@
     connPill: document.getElementById('conn-pill'),
     modelPill: document.getElementById('model-pill'),
     language: document.getElementById('language'),
+    modeSelect: document.getElementById('mode-select'),
+    pauseBtn: document.getElementById('pause-btn'),
     modelSelect: document.getElementById('model-select'),
     localNoteText: document.getElementById('local-note-text'),
     footerBackend: document.getElementById('footer-backend'),
@@ -139,6 +144,10 @@
     lastPartialText: '',
     language: 'zh',
     languages: [],
+    mode: 'personal',
+    paused: false,
+    pausedAt: null,
+    pausedMs: 0,
     maxRecordMinutes: 90,
     epoch: 0,
     sessionOriginMs: 0,
@@ -481,6 +490,14 @@
 
   /* ─────────────────────────── websocket ─────────────────────────── */
 
+  /** 局域网/手机访问：把页面 URL 里的访问令牌（?token=…）收进
+   * localStorage。PWA 从 start_url 启动会丢掉查询串，刷新/重开时靠这里
+   * 存下的令牌续命；本机模式没配令牌，存了也不会被用到。 */
+  function captureLanToken() {
+    const token = new URLSearchParams(location.search).get('token');
+    if (token) localStorage.setItem('echonote-token', token);
+  }
+
   function connect() {
     if (
       state.ws &&
@@ -491,7 +508,9 @@
 
     setConnPill('idle', '连接中');
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${proto}//${location.host}/ws`);
+    const lanToken = localStorage.getItem('echonote-token');
+    const query = lanToken ? `?token=${encodeURIComponent(lanToken)}` : '';
+    const ws = new WebSocket(`${proto}//${location.host}/ws${query}`);
     ws.binaryType = 'arraybuffer';
     state.ws = ws;
 
@@ -574,11 +593,20 @@
    * Start a new recording segment on the shared timeline. `epoch` is bumped
    * per recording session so `final.id` stays unique for the page lifetime
    * and `origin_ms` keeps absolute timestamps monotonic across reconnects.
+   *
+   * The origin must be the **audio** position this segment starts at, not the
+   * wall-clock elapsed: the exported WAV contains only captured samples, so a
+   * pause or an interruption gap exists on the wall clock but not in the
+   * audio. A wall-based origin stamped post-continue sentences seconds past
+   * where they actually play (field report: a row at 00:09 whose audio sits
+   * at 00:03 on the progress bar). The ledger counts exactly the frames sent
+   * to the server, so its sample position is by construction where the new
+   * server session's zero second lands in the file.
    */
   function beginSession() {
     state.epoch += 1;
-    state.sessionOriginMs = state.recordingStartedAt
-      ? Date.now() - state.recordingStartedAt.getTime()
+    state.sessionOriginMs = state.ledger
+      ? Math.round((state.ledger.sampleCount / SAMPLE_RATE) * 1000)
       : 0;
     sendConfig();
   }
@@ -607,6 +635,10 @@
         onServerWarning(message);
         break;
       case 'done':
+        // 会话收尾：最后一段（含精修）已全部落定。停止录音时挂上的
+        // 「正在生成最后一段…」到这里就该退场，否则它会一直留在界面上，
+        // 看起来像还有东西没完成。
+        if (!state.recording) setHint('已停止 · 可回放或导出');
         break;
       default:
         break;
@@ -716,6 +748,14 @@
         troubleshoot: !!message.auto_retry_exhausted,
       });
       setHint('模型加载失败 · 可点“重试”，无需重启程序');
+    } else if (message.download) {
+      // 原生壳的首启模型下载：字节级进度（native-boot 透出）。
+      const d = message.download;
+      setModelPill('idle', `模型下载 ${d.percent}%`);
+      setHint(
+        `正在下载模型 ${d.percent}%（${d.receivedMb}/${d.totalMb} MB）· ${d.file}（${d.fileIndex + 1}/${d.fileCount}）`
+      );
+      clearError();
     } else if (message.retrying) {
       setModelPill('idle', '正在重试');
       setHint(`正在重试（第 ${Math.max(1, message.retry_count || 1)} 次）…`);
@@ -739,6 +779,11 @@
     const canRecord = state.modelReady && state.connected;
     el.recordBtn.disabled = !canRecord && !state.recording;
     el.language.disabled = !state.modelReady;
+    if (el.pauseBtn) el.pauseBtn.disabled = !state.recording;
+    // The mode may be switched at any time (it applies from the next
+    // recording), but not *while* one is running: a change mid-recording
+    // would look like it did something to the session on screen.
+    if (el.modeSelect) el.modeSelect.disabled = !state.modelReady || state.recording;
     if (el.modelSelect) el.modelSelect.disabled = !state.modelReady || state.recording;
   }
 
@@ -796,6 +841,11 @@
       const defaultLanguage = config.language || 'zh';
       el.language.value = defaultLanguage;
       state.language = el.language.value;
+
+      if (el.modeSelect) {
+        el.modeSelect.value = config.mode || 'personal';
+        state.mode = el.modeSelect.value;
+      }
 
       state.maxRecordMinutes = Number(config.max_record_minutes) || 0;
       if (state.maxRecordMinutes === 0) {
@@ -973,7 +1023,10 @@
       const ctx = new AudioContext({ sampleRate: SAMPLE_RATE });
       state.audioCtx = ctx;
       if (ctx.state === 'suspended') await ctx.resume();
-      await ctx.audioWorklet.addModule('pcm-worklet.js');
+      // 版本号防缓存：worklet 模块同样会被浏览器缓存，改动后不带新版本号
+      // 时，旧模块会在强刷之外继续存活（录音链路的行为和 pcm-worklet.js
+      // 源码对不上，排查起来非常误导）。
+      await ctx.audioWorklet.addModule(`pcm-worklet.js?v=${ASSET_VERSION}`);
 
       const source = ctx.createMediaStreamSource(stream);
       const worklet = new AudioWorkletNode(ctx, 'pcm16');
@@ -1016,6 +1069,15 @@
       beginSession();
 
       state.recording = true;
+      state.paused = false;
+      state.pausedAt = null;
+      state.pausedMs = 0;
+      if (el.pauseBtn) {
+        el.pauseBtn.classList.remove('paused');
+        el.pauseBtn.setAttribute('aria-label', '暂停录音');
+        el.pauseBtn.title = '暂停录音';
+        setPauseLabel(false);
+      }
       el.recordBtn.classList.add('recording');
       el.recordBtn.setAttribute('aria-label', '停止录音');
       el.recordBtn.disabled = false;
@@ -1046,6 +1108,20 @@
   function stopRecording(options = {}) {
     if (!state.recording) return;
     const reason = options.reason || 'user';
+
+    // 暂停中直接按停止：把暂停段并入已计时长（durationMs 在暂停中本来就在
+    // 累加这一段），再走正常收尾，避免导出时长多扣一次。
+    if (state.paused) {
+      state.pausedMs += Date.now() - (state.pausedAt || Date.now());
+      state.paused = false;
+      state.pausedAt = null;
+    }
+    if (el.pauseBtn) {
+      el.pauseBtn.classList.remove('paused');
+      el.pauseBtn.setAttribute('aria-label', '暂停录音');
+      el.pauseBtn.title = '暂停录音';
+      setPauseLabel(false);
+    }
 
     state.recording = false;
     el.recordBtn.classList.remove('recording');
@@ -1088,9 +1164,78 @@
   }
 
   function durationMs() {
+    // 已有音频时，时长就是账本里的采样数：导出的 WAV、播放条、时长上限
+    // 都以实际录到的音频为准。暂停、断线续录的空档只在墙钟上存在，不在
+    // 音频里——用墙钟会把计时器也吹大同样的量。
+    if (state.ledger && state.ledger.sampleCount > 0) {
+      return Math.round((state.ledger.sampleCount / SAMPLE_RATE) * 1000);
+    }
     if (!state.recordingStartedAt) return 0;
     const end = state.recording ? Date.now() : (state.endedAt || state.recordingStartedAt).getTime();
-    return Math.max(0, end - state.recordingStartedAt.getTime());
+    let paused = state.pausedMs || 0;
+    if (state.paused && state.pausedAt) paused += Date.now() - state.pausedAt;
+    return Math.max(0, end - state.recordingStartedAt.getTime() - paused);
+  }
+
+  async function pauseRecording() {
+    if (!state.recording || state.paused) return;
+    state.paused = true;
+    state.pausedAt = Date.now();
+    // 暂停的实现是挂起采集 AudioContext：worklet 停止产帧，于是既没有字节
+    // 进录音文件，也没有帧进识别管线。对比「继续发静音帧」的方案：那会把
+    // 一段真实存在的无声写进导出的 WAV，SRT 时间轴也随之漂移。
+    try {
+      await state.audioCtx?.suspend();
+    } catch (error) {
+      console.warn('[echonote] 挂起音频上下文失败：', error);
+    }
+    // 冲一句话尾：把说到一半的句子立即定稿，别让半句字幕挂在暂停的
+    // 界面上直到恢复才落地。
+    if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+      state.ws.send(JSON.stringify({ type: 'flush' }));
+    }
+    if (el.pauseBtn) {
+      el.pauseBtn.classList.add('paused');
+      el.pauseBtn.setAttribute('aria-label', '继续录音');
+      el.pauseBtn.title = '继续录音';
+      setPauseLabel(true);
+    }
+    setHint('已暂停 · 点「继续」恢复录制');
+    announce('已暂停录音');
+  }
+
+  async function resumeRecording() {
+    if (!state.recording || !state.paused) return;
+    state.pausedMs += Date.now() - (state.pausedAt || Date.now());
+    state.paused = false;
+    state.pausedAt = null;
+    try {
+      await state.audioCtx?.resume();
+    } catch (error) {
+      console.warn('[echonote] 恢复音频上下文失败：', error);
+      showError('恢复录音失败，请停止后重新开始');
+      stopRecording({ reason: 'user' });
+      return;
+    }
+    if (el.pauseBtn) {
+      el.pauseBtn.classList.remove('paused');
+      el.pauseBtn.setAttribute('aria-label', '暂停录音');
+      el.pauseBtn.title = '暂停录音';
+      setPauseLabel(false);
+    }
+    setHint('正在录音 · 实时转写中');
+    announce('继续录音');
+  }
+
+  function setPauseLabel(paused) {
+    if (!el.pauseBtn) return;
+    const label = el.pauseBtn.querySelector('.pause-label');
+    if (label) label.textContent = paused ? '继续' : '暂停';
+  }
+
+  function togglePauseResume() {
+    if (state.paused) resumeRecording();
+    else pauseRecording();
   }
 
   /**
@@ -1679,6 +1824,18 @@
     return state.playCtx;
   }
 
+  /**
+   * 手机浏览器（iOS Safari / 安卓 Chrome）的出声门槛：AudioContext 只有在
+   * 用户手势的**同步**调用栈里被创建并 resume 过才允许出声。startPlayback
+   * 是 async，走到 ctx.resume() 之前可能已经过了 await，手势资格就丢了——
+   * 表现就是进度条在走、一点声音都没有。所以任何播放条手势的第一件事都是
+   * 先无脑解锁，再走异步流程；失败也被下一次手势重试。
+   */
+  function unlockPlayCtx() {
+    const ctx = ensurePlayCtx();
+    if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+  }
+
   /** 当前播放头位置：已排入队列的末端位置减去队列里还没放完的时长。 */
   function playPosition() {
     const ctx = state.playCtx;
@@ -1977,6 +2134,7 @@
 
   function togglePlay() {
     if (state.recording || playDurationS() <= 0) return;
+    unlockPlayCtx(); // 手势内先解锁，见 unlockPlayCtx 的说明
     if (state.playState === 'seeking') return; // 正在定位，等它收尾
     if (state.playState === 'playing') {
       pausePlayback();
@@ -2075,7 +2233,13 @@
   function spaceGoesToPlayback() {
     if (!Playback || state.recording || playDurationS() <= 0) return false;
     if (state.playState !== 'idle') return true;
-    return state.playInteracted;
+    if (state.playInteracted) return true;
+    // 一段刚录完的音频还没听过：空格在这里的含义是「先听听刚录的」。
+    // 旧规则在这一步落入「开始新录音」，用户按空格想播放，迎面而来的却是
+    // 「清空并开始」确认框——实测里被当成「点播放却要我清空」的 bug 报了
+    // 回来。已有可听的音频后，空格归播放；开始新录音仍走大按钮（那里有
+    // 保护性确认）。
+    return !!state.endedAt;
   }
 
   function wirePlaybar() {
@@ -2097,11 +2261,15 @@
       seekTo(value, { play: true });
     });
 
-    // 「最近一次交互在播放条内」：捕获阶段记，早于任何 click。
+    // 「最近一次交互在播放条内」：捕获阶段记，早于任何 click。顺手在这里
+    // 解锁播放上下文——这是离用户手势最近的一点，等 click 冒泡完再解锁，
+    // 异步流程里可能已经丢掉手势资格（手机上就是无声）。
     document.addEventListener(
       'pointerdown',
       (event) => {
-        state.playInteracted = !!el.playbar && el.playbar.contains(event.target);
+        const inside = !!el.playbar && el.playbar.contains(event.target);
+        state.playInteracted = inside;
+        if (inside) unlockPlayCtx();
       },
       true
     );
@@ -2292,8 +2460,42 @@
     announce(`识别语言已切换为${Expo.languageLabel(state.language, state.languages)}`);
   });
 
+  if (el.pauseBtn) {
+    el.pauseBtn.addEventListener('click', togglePauseResume);
+  }
+
   if (el.modelSelect) {
     el.modelSelect.addEventListener('change', () => switchModel(el.modelSelect.value));
+  }
+
+  if (el.modeSelect) {
+    el.modeSelect.addEventListener('change', async () => {
+      const next = el.modeSelect.value;
+      if (next === state.mode) return;
+      try {
+        const res = await fetch('/api/mode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: next }),
+        });
+        const data = await res.json();
+        if (!data.ok) {
+          el.modeSelect.value = state.mode;
+          showError(`切换失败：${data.error || '未知原因'}`);
+          return;
+        }
+        state.mode = data.mode;
+        announce(
+          data.mode === 'meeting'
+            ? '已切换到会议模式，从下一段录音开始生效'
+            : '已切换到个人模式，从下一段录音开始生效'
+        );
+        setHint(next === 'meeting' ? '会议模式已就绪 · 远场抗噪' : '个人模式已就绪');
+      } catch {
+        el.modeSelect.value = state.mode;
+        showError('切换请求失败，请确认服务仍在运行');
+      }
+    });
   }
 
   /**
@@ -2383,10 +2585,18 @@
     wf.drawIdle();
     updateExportState();
     reportUnfinishedRecordings();
+    captureLanToken();
     await loadConfig();
     connect();
     pollStatus();
   }
 
-  boot();
+  // 原生壳（Capacitor）的适配模块是 <script type=module>，在整页解析完
+  // 之后、DOMContentLoaded 之前执行；这里把启动挂到 DOMContentLoaded，
+  // 保证「补丁先于启动」的顺序在桌面直连与原生桥两种环境都成立。
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => boot());
+  } else {
+    boot();
+  }
 })();

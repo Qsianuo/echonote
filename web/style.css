@@ -293,6 +293,59 @@ select {
   padding: 30px 20px 10px;
 }
 
+.recorder-controls {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+/* 暂停/继续：录音大键旁边的常驻按钮。不录音时置灰常显（让人知道它存在），
+   录音中亮起；暂停态换成暖色。大键永远只管「开始 / 结束」。 */
+.pause-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 46px;
+  padding: 0 20px;
+  border-radius: 23px;
+  border: 1px solid var(--border-strong);
+  background: rgba(10, 25, 47, 0.92);
+  color: var(--accent);
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.pause-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 0 26px rgba(100, 255, 218, 0.18);
+}
+
+.pause-btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.pause-btn .icon-play {
+  display: none;
+}
+
+.pause-btn.paused .icon-pause {
+  display: none;
+}
+
+.pause-btn.paused .icon-play {
+  display: block;
+}
+
+/* 暂停态换成暖色，和录音中的红色、可录的青色都能区分开。 */
+.pause-btn.paused {
+  color: #ffd28a;
+  border-color: rgba(255, 190, 100, 0.55);
+  box-shadow: 0 0 22px rgba(255, 190, 100, 0.16);
+}
+
 .record-btn {
   position: relative;
   width: 106px;
@@ -1044,5 +1097,66 @@ dialog p b {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+  }
+}
+
+/* ───────────── 手机（窄幅）：转写区必须进首屏 ─────────────
+   桌面布局里控制面板（录音键 + 波形 + 设置 + 说明文案）把转写区推到了
+   首屏之外，手机上要滑半屏才能看到文字——手机实测反馈的第一条。
+   方案：砍掉对手机端无操作意义的说明文案、收间距、缩录音键，
+   转写区抬高并放开高度上限。 */
+@media (max-width: 720px) {
+  .topbar {
+    padding-top: 10px;
+    padding-bottom: 8px;
+  }
+
+  .recorder {
+    padding: 10px 12px 2px;
+    gap: 8px;
+  }
+
+  .recorder-controls {
+    gap: 12px;
+  }
+
+  .record-btn {
+    width: 82px;
+    height: 82px;
+  }
+
+  .pause-btn {
+    height: 40px;
+    padding: 0 14px;
+    font-size: 14px;
+  }
+
+  .timer {
+    font-size: 24px;
+  }
+
+  .hint {
+    font-size: 12px;
+  }
+
+  #waveform {
+    height: 48px;
+  }
+
+  /* 模型准备说明、隐私说明：识别跑在电脑上，这些文案对手机端只有
+     高度成本，没有操作意义。 */
+  .local-note,
+  .model-notice,
+  .speed-notice {
+    display: none;
+  }
+
+  .control-panel .panel-head {
+    padding: 12px 16px 8px;
+  }
+
+  .transcript-panel {
+    min-height: 55vh;
+    max-height: none;
   }
 }

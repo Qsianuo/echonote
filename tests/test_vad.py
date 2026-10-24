@@ -27,6 +27,32 @@ def test_silence_yields_nothing():
     assert segmenter.flush() is None
 
 
+def _room_noise(seconds: float) -> np.ndarray:
+    """Steady non-speech background at rms ≈ 0.004 (a quiet, not silent, room)."""
+    rng = np.random.default_rng(7)
+    return rng.normal(0, 0.004, int(SAMPLE_RATE * seconds)).astype(np.float32)
+
+
+def test_gate_ratio_is_the_noise_robustness_lever():
+    """The meeting-mode lever, isolated: the same mid-level blip opens the
+    dictation gate (floor * 3) but stays below a meeting gate (floor * 4.5).
+
+    The absolute gate is deliberately identical in both — far-field speech is
+    quieter, so raising it would mute the speaker the mode exists to hear.
+    """
+    audio = np.concatenate(
+        [
+            _room_noise(1.0),  # establish the floor
+            speech(0.3, amplitude=0.02),  # rms ≈ 0.014: between the two gates
+            silence(1.5),  # let the hangover close whatever opened
+        ]
+    )
+    personal = feed(Segmenter(gate_ratio=3.0), audio)
+    meeting = feed(Segmenter(gate_ratio=4.5), audio)
+    assert len(personal) == 1
+    assert meeting == []
+
+
 def test_short_blip_is_dropped():
     """200 ms of speech is below the 270 ms minimum (9 frames)."""
     segmenter = Segmenter()

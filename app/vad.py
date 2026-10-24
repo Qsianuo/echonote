@@ -29,10 +29,17 @@ class Segmenter:
         min_speech_ms: int = config.VAD_MIN_SPEECH_MS,
         max_segment_s: float = config.VAD_MAX_SEGMENT_S,
         preroll_ms: int = config.VAD_PREROLL_MS,
+        gate_ratio: float = 3.0,
     ) -> None:
         self.sample_rate = sample_rate
         self.frame_size = int(sample_rate * FRAME_MS / 1000)
         self.base_threshold = threshold
+        # How far above the *tracked room floor* a frame must stand to count
+        # as voice (``threshold = max(base_threshold, floor * gate_ratio)``).
+        # The recording-mode presets tune this: a meeting room has a louder
+        # floor than a desk, so it needs a wider margin, while the absolute
+        # gate stays put to keep far-field speech audible.
+        self.gate_ratio = float(gate_ratio)
         # 650 ms / 30 ms -> 21 frames = 630 ms effective
         self.hangover_frames = max(1, int(hangover_ms / FRAME_MS))
         # 280 ms / 30 ms -> 9 frames = 270 ms effective
@@ -118,7 +125,7 @@ class Segmenter:
 
     def _process_frame(self, frame: np.ndarray) -> dict | None:
         rms = float(np.sqrt(np.mean(np.square(frame), dtype=np.float64)))
-        threshold = max(self.base_threshold, self.noise_floor * 3.0)
+        threshold = max(self.base_threshold, self.noise_floor * self.gate_ratio)
         is_voice = rms > threshold
         self.last_rms = rms
         self.last_threshold = threshold

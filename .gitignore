@@ -56,3 +56,24 @@ build_v*/
 
 # Desktop shell log file (dev runs write it next to the repo root)
 logs/
+
+# 正式签名密钥：泄露=应用被人接管更新，永不入库
+mobile/android/keystore/
+mobile/android/keystore.properties
+
+# === 商店构建产物（不入库，见 docs/上架指南.md）===
+*.apk
+*.aab
+
+# === 移动端 ===
+mobile/node_modules/
+mobile/test/out/
+mobile/test/fixtures.json
+mobile/android/app/src/main/jniLibs/
+mobile/android/app/src/main/assets/public/
+mobile/android/app/src/main/assets/capacitor.config.json
+mobile/android/capacitor-cordova-android-plugins/
+mobile/android/local.properties
+mobile/android/.idea/
+mobile/ios/App/Pods/
+mobile/ios/App/App/public/

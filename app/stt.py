@@ -23,6 +23,7 @@ import numpy as np
 
 from . import config, models
 from . import asr_remote
+from . import asr_sensevoice
 from . import asr_sherpa
 
 log = logging.getLogger("echonote.stt")
@@ -149,6 +150,14 @@ def live_backend() -> str:
     """
     if config.ASR_BACKEND == "sherpa":
         return "sherpa"
+    if config.ASR_BACKEND == "sensevoice":
+        # SenseVoice cannot stream, so the caption needs another engine — the
+        # same hybrid the remote backend uses. The zipformer goes first when
+        # it is installed: it is already on disk next to this model and costs
+        # no whisper weights.
+        if asr_sherpa.is_installed():
+            return "sherpa"
+        return "whisper"
     if config.ASR_LIVE_REMOTE:
         return "remote"
     if config.ASR_BACKEND == "remote" and asr_sherpa.is_installed():
@@ -164,6 +173,10 @@ def live_is_separate() -> bool:
         # models that are not even loaded — and "refine" would then re-decode
         # every utterance with the same weights it was just decoded with.
         return False
+    if config.ASR_BACKEND == "sensevoice":
+        # The final model is SenseVoice; whatever draws the caption (zipformer
+        # or a whisper live model) is a different engine by construction.
+        return True
     if live_backend() == "sherpa":
         # Hybrid: two genuinely different engines, so a second pass is a real
         # second pass rather than the same weights run twice.
@@ -221,9 +234,18 @@ def load_live() -> bool:
 
     main = config.model_target()
     target = live_target()
-    if target.key == main.key and target.path == main.path:
+    if (
+        config.ASR_BACKEND != "sensevoice"
+        and target.key == main.key
+        and target.path == main.path
+    ):
         # One model serves both roles; drop any dedicated instance so the
         # memory is not held twice.
+        #
+        # The sensevoice backend is excluded: its whisper "main" model is
+        # never loaded (SenseVoice runs the finals), so collapsing onto it
+        # would leave the caption engine pointing at ``None`` and every live
+        # caption would come back empty.
         with _live_load_lock:
             _live_model = None
             _live_key = None
@@ -332,6 +354,26 @@ def load() -> bool:
             _ready.set()
         else:
             _error = "sherpa-onnx 模型未就绪：请检查 models/sherpa-zipformer-zh 下的四个文件"
+            _ready.clear()
+            _retry_blocked = True
+            log.error("%s", _error)
+        return ok
+
+    if config.ASR_BACKEND == "sensevoice":
+        # Same reasoning as the sherpa branch: an explicit backend choice
+        # needs no faster-whisper weights at all. The live caption engine is
+        # loaded separately (see ``load_live``).
+        ok = asr_sensevoice.load()
+        _loaded_key = asr_sensevoice.label()
+        if ok:
+            _error = None
+            _ready.set()
+        else:
+            _error = (
+                "SenseVoice 模型未就绪：请运行 "
+                "python tools/fetch_model.py --model sensevoice，"
+                "或检查 models/sherpa-sense-voice-small 下的两个文件"
+            )
             _ready.clear()
             _retry_blocked = True
             log.error("%s", _error)
@@ -618,6 +660,22 @@ def status() -> dict:
         result["live_model_label"] = "sherpa 流式"
         result["rtf"] = None
         result["offline_ready"] = asr_sherpa.is_installed()
+    elif config.ASR_BACKEND == "sensevoice":
+        # SenseVoice runs the finals, so the whisper names describe a model
+        # that is neither loaded nor used. The live names depend on which
+        # engine the caption fell back to; the whisper ones from the base
+        # dict are already right for the whisper case.
+        result["backend"] = "sensevoice"
+        result["model"] = asr_sensevoice.label()
+        result["model_key"] = "sensevoice"
+        result["model_label"] = "SenseVoice 离线"
+        result["rtf"] = None
+        result["offline_ready"] = asr_sensevoice.is_installed()
+        if live_backend() == "sherpa":
+            result["live_model"] = asr_sherpa.label()
+            result["live_model_key"] = "sherpa"
+            result["live_model_label"] = "本地流式"
+            result["live_separate"] = True
     elif config.ASR_REMOTE and live_backend() == "sherpa":
         # Hybrid: the final text comes from the endpoint, the caption from the
         # local streaming model. The local whisper names describe neither, and
@@ -702,6 +760,11 @@ def refine_enabled() -> bool:
     """
     if not (config.REFINE_FINALS and config.LIVE_CAPTIONS and live_is_separate()):
         return False
+    if config.ASR_BACKEND == "sensevoice":
+        # The final model is SenseVoice, the caption model is not — the size
+        # rule below compares two whisper specs and would gate a genuinely
+        # second pass on numbers that describe a model nobody loaded.
+        return True
     return _size_of(config.model_target()) > _size_of(live_target())
 
 
@@ -716,6 +779,8 @@ def refine_blocked_reason() -> str | None:
         return "disabled"
     if not live_is_separate():
         return "single_model"
+    if config.ASR_BACKEND == "sensevoice":
+        return None
     if _size_of(config.model_target()) <= _size_of(live_target()):
         return "final_model_not_bigger"
     return None
@@ -906,6 +971,10 @@ def transcribe(
 
     if config.ASR_BACKEND == "sherpa":
         text = asr_sherpa.transcribe(audio, lang, hotwords=hotwords or config.HOTWORDS)
+        return "" if text is None else _clean(text, None)
+
+    if config.ASR_BACKEND == "sensevoice":
+        text = asr_sensevoice.transcribe(audio, lang, hotwords=hotwords or config.HOTWORDS)
         return "" if text is None else _clean(text, None)
 
     if config.ASR_REMOTE:

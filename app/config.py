@@ -210,6 +210,71 @@ REPEAT_MAX_DURATION_S = _env_float("ECHONOTE_REPEAT_MAX_DURATION_S", 1.5)
 VAD_DEBUG = _env_flag("ECHONOTE_VAD_DEBUG")
 
 # --------------------------------------------------------------------------
+# Recording modes（个人 / 会议）
+#
+# A mode is a named set of *segmentation* overrides applied when a recording
+# session starts: ``StreamingSession._run`` builds one ``Segmenter`` per
+# session, so a switch lands on the next recording without touching the one
+# in flight. Keys must name ``Segmenter.__init__`` parameters; anything
+# omitted keeps the ``VAD_*`` defaults above.
+#
+# ``meeting`` exists because a room is the opposite of desk dictation: the
+# speaker is farther away (quieter) while keyboards, chairs and the HVAC are
+# closer (louder). Raising the absolute gate would hurt exactly the speaker
+# we are trying to hear, so the meeting preset instead raises
+# ``gate_ratio`` — how far above the *measured room floor* a frame must
+# stand to count as voice — and demands a longer run of consecutive speech
+# before a segment is confirmed, which eats the short bursts (a clack, a
+# cough) that pass any energy gate.
+# --------------------------------------------------------------------------
+
+MODES: dict[str, dict] = {
+    "personal": {},
+    "meeting": {
+        "gate_ratio": 4.0,
+        "hangover_ms": 1200,
+        "min_speech_ms": 300,
+        "preroll_ms": 400,
+    },
+}
+DEFAULT_MODE = "personal"
+
+
+def _sticky_mode() -> str:
+    """The mode the user last picked, if any (same pattern as the backend)."""
+    path = Path(MODEL_DIR) / "mode.txt"
+    try:
+        value = path.read_text(encoding="utf-8").strip().lower()
+    except OSError:
+        return ""
+    return value if value in MODES else ""
+
+
+MODE_CHOICE = os.getenv("ECHONOTE_MODE", "").strip().lower() or _sticky_mode()
+
+# Read on every session start; ``POST /api/mode`` mutates it (and the sticky
+# file), so a mode switch never needs a process restart.
+ACTIVE_MODE = MODE_CHOICE or DEFAULT_MODE
+
+
+def remember_mode(name: str | None) -> None:
+    """Persist the mode choice so a restart does not undo it."""
+    path = Path(MODEL_DIR) / "mode.txt"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if name:
+            path.write_text(name.strip().lower() + "\n", encoding="utf-8")
+        elif path.exists():
+            path.unlink()
+    except OSError:
+        log.warning("Could not persist the mode choice to %s", path)
+
+
+def mode_overrides() -> dict:
+    """``Segmenter`` kwargs for the active mode."""
+    return dict(MODES.get(ACTIVE_MODE) or {})
+
+# --------------------------------------------------------------------------
 # Remote ASR backend (OpenAI-compatible /audio/transcriptions)
 # --------------------------------------------------------------------------
 #
@@ -330,8 +395,28 @@ SHERPA_MODEL_DIR = os.getenv(
 # browser for cores.
 SHERPA_THREADS = _env_int("ECHONOTE_SHERPA_THREADS", 2)
 
+# --------------------------------------------------------------------------
+# Local offline ASR (sherpa-onnx SenseVoice)
+# --------------------------------------------------------------------------
+#
+# SenseVoice-small is a non-streaming multilingual model (zh/en/ja/ko/yue,
+# ~230 MB int8) from the FunASR family — the engine behind the recurring
+# "中文比 Whisper 准" recommendation. It takes the *final* role only: it has
+# no streaming mode, so with this backend the live caption stays on the
+# zipformer (or the whisper live model), the same split the remote backend
+# uses minus the network. Fetched with
+# ``python tools/fetch_model.py --model sensevoice``.
+SENSEVOICE_MODEL_DIR = os.getenv(
+    "ECHONOTE_SENSEVOICE_DIR", str(Path(MODEL_DIR) / models.SENSEVOICE_DIRNAME)
+)
+# Same reasoning as SHERPA_THREADS: more threads just fight the browser.
+SENSEVOICE_THREADS = _env_int("ECHONOTE_SENSEVOICE_THREADS", 2)
+# Inverse text normalisation: "二零二六" -> "2026". Default on — these are notes.
+SENSEVOICE_USE_ITN = _env_flag("ECHONOTE_SENSEVOICE_ITN", default=True)
+
 # Which engine actually decodes: "whisper" (faster-whisper), "sherpa"
-# (streaming zipformer) or "remote" (OpenAI-compatible endpoint). Explicit env
+# (streaming zipformer), "sensevoice" (offline SenseVoice finals, live caption
+# on another engine) or "remote" (OpenAI-compatible endpoint). Explicit env
 # wins, then the user's remembered choice, then a configured remote endpoint,
 # then Whisper. Persisting the choice matters: without it a restart silently
 # reverts to local inference while the UI still says what the user picked.

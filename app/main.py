@@ -24,7 +24,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from . import asr_sherpa, config, models, protocol, stt
+from . import asr_sensevoice, asr_sherpa, config, models, protocol, stt
 from .live import LiveCaptioner
 from .timing import TurnTiming
 from .vad import Segmenter
@@ -185,6 +185,26 @@ def switch_model(payload: dict) -> dict:
     return JSONResponse(result, status_code=200 if result.get("ok") else 400)
 
 
+@app.post("/api/mode")
+def switch_mode(payload: dict) -> dict:
+    """Switch the recording-mode preset (personal / meeting).
+
+    Applies from the **next** recording: a session's ``Segmenter`` is built
+    when the recording starts, so the segmentation rules of one utterance
+    never change mid-utterance. The choice is sticky across restarts.
+    """
+    name = str((payload or {}).get("mode") or "").strip().lower()
+    if name not in config.MODES:
+        return JSONResponse(
+            {"ok": False, "error": f"未知模式 {name!r}，可选：{' / '.join(config.MODES)}"},
+            status_code=400,
+        )
+    config.ACTIVE_MODE = name
+    config.remember_mode(name)
+    log.info("Recording mode set to %s (applies from the next recording)", name)
+    return {"ok": True, "mode": name}
+
+
 @app.get("/api/config")
 def get_config() -> dict:
     target = config.model_target()
@@ -199,9 +219,13 @@ def get_config() -> dict:
             "sherpa"
             if config.ASR_BACKEND == "sherpa"
             else (
-                "remote"
-                if (config.ASR_REMOTE or config.ASR_REMOTE_ONLY)
-                else "local"
+                "sensevoice"
+                if config.ASR_BACKEND == "sensevoice"
+                else (
+                    "remote"
+                    if (config.ASR_REMOTE or config.ASR_REMOTE_ONLY)
+                    else "local"
+                )
             )
         ),
         "asr_remote_model": config.ASR_REMOTE_MODEL
@@ -229,6 +253,9 @@ def get_config() -> dict:
         "queue_max_seconds": config.AUDIO_QUEUE_MAX_SECONDS,
         "hotwords": config.HOTWORDS or "",
         "max_sessions": config.MAX_CONCURRENT_SESSIONS,
+        # Recording-mode preset ("personal" / "meeting"); the UI offers the
+        # named list, the server owns the parameter sets behind them.
+        "mode": config.ACTIVE_MODE,
     }
     if config.ASR_BACKEND == "sherpa":
         # The whisper names describe a model that is not loaded and will not
@@ -246,6 +273,24 @@ def get_config() -> dict:
             live_separate=False,
             refine=False,
         )
+    elif config.ASR_BACKEND == "sensevoice":
+        # SenseVoice runs the finals; the whisper names would describe a model
+        # that is not loaded. The live caption runs on another engine, which
+        # is why ``live_separate`` is True here and not in the sherpa branch.
+        payload.update(
+            model=asr_sensevoice.label(),
+            model_label="SenseVoice 离线",
+            model_key="sensevoice",
+            offline_ready=asr_sensevoice.is_installed(),
+            live_separate=True,
+            refine=stt.refine_enabled(),
+        )
+        if stt.live_backend() == "sherpa":
+            payload.update(
+                live_model=asr_sherpa.label(),
+                live_model_key="sherpa",
+                live_model_label="本地流式",
+            )
     elif config.ASR_REMOTE and stt.live_backend() == "sherpa":
         # Hybrid: remote finals, local caption. The whisper names in the
         # payload would describe a model that is not loaded, and the picker
@@ -478,7 +523,10 @@ class StreamingSession:
     # ------------------------------------------------------------- worker
 
     def _run(self) -> None:
-        segmenter = Segmenter()
+        # The mode preset lands here, at session start: a switch made while a
+        # recording is running applies from the next recording, so the
+        # segmentation rules of one utterance never change mid-utterance.
+        segmenter = Segmenter(**config.mode_overrides())
         in_utterance = False
         debug = config.VAD_DEBUG
         dbg_peak = 0.0

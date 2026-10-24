@@ -30,7 +30,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--model",
         default=None,
-        help="catalog key (default: the pair the app runs on — a fast live "
+        help="catalog key, or 'sensevoice' for the offline SenseVoice backend "
+        "(default: the pair the app runs on — a fast live "
         "model plus the default final model)",
     )
     parser.add_argument("--all", action="store_true", help="fetch every catalog entry")
@@ -54,11 +55,32 @@ def main(argv: list[str] | None = None) -> int:
                 f" {mark} {spec.key:<14} {spec.label:<6} {fetch.human(spec.size_mb):>8}  "
                 f"{'present' if present else '-':<8} {spec.note}"
             )
+        sensevoice_dir = model_dir / models.SENSEVOICE_DIRNAME
+        sensevoice_present = all(
+            (sensevoice_dir / name).is_file() for name in models.SENSEVOICE_FILES
+        )
+        print(
+            f"   {'sensevoice':<14} {'中文':<6} {'~230 MB':>8}  "
+            f"{'present' if sensevoice_present else '-':<8} "
+            "SenseVoice 定稿档（ECHONOTE_ASR_BACKEND=sensevoice 时使用）"
+        )
         print(
             "\n* = part of the default pair (live caption model + final model)."
             " Pass --model <key> to fetch one specific model."
         )
         return 0
+
+    if args.model == "sensevoice":
+        # Not part of the whisper catalog: it is a backend of its own
+        # (ECHONOTE_ASR_BACKEND=sensevoice) with a different file layout, so
+        # it bypasses the ModelSpec loop entirely.
+        fetch.prepare_env(args.endpoint)
+        model_dir.mkdir(parents=True, exist_ok=True)
+        ok = fetch.download_sensevoice(model_dir, endpoint=args.endpoint, force=args.force)
+        print()
+        if ok:
+            print("Model ready. The app needs no network from here on.")
+        return 0 if ok else 1
 
     if args.all:
         specs = list(models.CATALOG)

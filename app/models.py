@@ -135,6 +135,16 @@ LIVE_PREFERENCE = ("base", "small", "tiny")
 BY_KEY: dict[str, ModelSpec] = {spec.key: spec for spec in CATALOG}
 
 
+# The SenseVoice backend lives outside the whisper CATALOG on purpose — it is
+# a backend value of ``ASR_BACKEND`` (like the zipformer), not a dropdown
+# entry. Its folder name, repo and file list still belong here so that
+# ``config``, the fetcher and ``asr_sensevoice`` quote one set of strings
+# instead of three copies that can drift apart.
+SENSEVOICE_DIRNAME = "sherpa-sense-voice-small"
+SENSEVOICE_REPO = "csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17"
+SENSEVOICE_FILES = ("model.int8.onnx", "tokens.txt")
+
+
 def default_pair() -> tuple[str, ...]:
     """The two keys a fresh install needs: one for captions, one for finals.
 

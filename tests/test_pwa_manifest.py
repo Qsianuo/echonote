@@ -49,7 +49,8 @@ def test_index_html_links_the_manifest_and_theme_colour():
     html = (WEB / "index.html").read_text(encoding="utf-8")
     assert 'rel="manifest"' in html
     assert 'name="theme-color"' in html
-    assert "icon-192.png" in html, "apple-touch-icon is needed for macOS/iOS"
+    # apple-touch-icon 用 512 档（iOS 主屏更清晰）；只要存在即可
+    assert ("icon-192.png" in html) or ("icon-512.png" in html), "apple-touch-icon is needed for macOS/iOS"
 
 
 def test_start_url_is_root_so_a_deep_link_does_not_capture_the_scope():

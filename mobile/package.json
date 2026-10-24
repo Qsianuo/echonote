@@ -1,0 +1,23 @@
+{
+  "name": "echonote-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "EchoNote 移动端壳（Capacitor）：本地 sherpa-onnx 识别，离线优先",
+  "scripts": {
+    "add:android": "npx cap add android",
+    "add:ios": "npx cap add ios",
+    "sync": "npx cap sync",
+    "test": "node test/vad.test.mjs"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/filesystem": "^7.0.0",
+    "@capacitor/ios": "^7.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.0.0",
+    "typescript": "^7.0.2"
+  }
+}

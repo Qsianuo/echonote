@@ -77,3 +77,6 @@ mobile/android/local.properties
 mobile/android/.idea/
 mobile/ios/App/Pods/
 mobile/ios/App/App/public/
+
+# 演示音源：原生壳 ?demo 模式与一致性测试用的真实人声样本（例外于 *.wav）
+!web/sample.wav

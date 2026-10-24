@@ -1,0 +1,9 @@
+{
+  "appId": "com.echonote.app",
+  "appName": "EchoNote 声记",
+  "webDir": "../web",
+  "android": {
+    "permissions": ["RECORD_AUDIO"],
+    "webContentsDebuggingEnabled": true
+  }
+}

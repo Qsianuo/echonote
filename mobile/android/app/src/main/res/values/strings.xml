@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">EchoNote 声记</string>
+    <string name="title_activity_main">EchoNote 声记</string>
+    <string name="package_name">com.echonote.app</string>
+    <string name="custom_url_scheme">com.echonote.app</string>
+</resources>

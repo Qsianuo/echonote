@@ -6,9 +6,10 @@
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![Whisper](https://img.shields.io/badge/faster--whisper-local%20STT-412991?style=flat-square&logo=openai&logoColor=white)](https://github.com/SYSTRAN/faster-whisper)
+[![ASR](https://img.shields.io/badge/ASR-SenseVoice%20%7C%20zipformer%20%7C%20Whisper-412991?style=flat-square)](#-引擎与基准)
 [![License](https://img.shields.io/badge/License-MIT-64ffda?style=flat-square)](LICENSE)
-[![Stage](https://img.shields.io/badge/stage-v0.12.1%20tech%20preview-f0b429?style=flat-square)](#-延迟口径重要)
+[![Release](https://img.shields.io/badge/release-v1.0.0-64ffda?style=flat-square)](#-快速开始)
+[![Android](https://img.shields.io/badge/Android-App%20Ready-3DDC84?style=flat-square&logo=android&logoColor=white)](mobile/README.md)
 
 边说边出字 · 录音不上传 · 装好模型后完全离线 · 支持中英日韩等多语言
 
@@ -16,26 +17,28 @@
 
 ---
 
-> **这是 v0.12.1 技术预览（tech preview），不是 v1.0.0。**
-> 三件事需要先说清楚：**实验性**；**延迟取决于硬件**（本机实测首字 2.8 s、停顿后 1 s 出定稿、约 12 s 完成精修，见下文口径）；**首次准备要下载两个模型**（145 MB + 1.5 GB），之后可完全断网运行。
+> **v1.0.0**：桌面版（Windows 便携包 / 源码）与 **Android App**（Capacitor + 原生
+> sherpa-onnx，离线识别）双端形态，iOS 工程已就绪。老规矩三件事：**实验性**；
+> **延迟取决于硬件**（本机实测首字 2.8 s、停顿后 1 s 出定稿，见下文口径）；
+> **首次准备要下载模型**（桌面双档 / 手机约 270 MB），之后可完全断网运行。
 
 ---
 
 ## ✨ 功能
 
-- 🎙 **一键录音** —— 浏览器麦克风采集，16 kHz 单声道 PCM
-- ⚡ **实时转写** —— 边说边出字，停顿后自动断句
-- 🔒 **默认完全本地** —— 语音识别默认用本地 faster-whisper 模型，音频不出本机；也可以显式切到远程 OpenAI 兼容接口，见[远程识别](#-远程识别可选)
-- ⚡ **边说边出字** —— 两个模型分工：`base` 边说边画实时字幕，`medium` 在每句结束后重写定稿（本机样本字符错误率 0）；界面里可随时切换档位
-- 🔌 **真正离线** —— 模型在磁盘上时，识别全程零联网；`--offline` 还能强制断网启动
+- 🎙 **一键录音 · 暂停/继续** —— 一段录音随时暂停接着录，时间轴自动对齐，导出 TXT/SRT/WAV/MD
+- 🧠 **SenseVoice 定稿引擎（v1.0.0 新增）** —— FunASR 系离线模型，自带标点与数字规整，比 Whisper 定稿快约 5 倍
+- 🎭 **录入情境** —— 个人模式（近讲低延迟）/ 会议模式（抬高信噪门限 + 更严切句，挡键盘咳嗽这类短促杂音）
+- 📱 **Android App** —— 同一套前端 + 原生 sherpa-onnx 插件，录音/转写/回放/导出全在手机本地
+- 🌐 **手机免装访问** —— 电脑开一个局域网服务，iPhone/安卓浏览器扫码即用（PWA）
+- 🔇 **采集降噪** —— 80 Hz 高通 + 50/100/150 Hz 工频陷波 + 两级抗混叠低通 + 自适应增益（+24 dB 上限）
+- ⚡ **边说边出字** —— 流式模型画实时字幕，更准的模型在每句结束后重写定稿（本机样本字符错误率 0）
+- 🔌 **真正离线** —— 模型在磁盘上时识别全程零联网；`--offline` 还能强制断网启动
 - 🌍 **多语言** —— 中文 / 英文 / 日文 / 韩文 / 法文 / 德文 / 西班牙文 / 俄文，可自动识别
-- 📝 **四种导出** —— TXT 文本、Markdown 笔记、SRT 字幕、WAV 原始录音
-- 💾 **边录边落盘** —— 音频分片同步写入浏览器 OPFS，录音期间内存占用与时长无关；OPFS 不可用（隐私模式等）时自动降级为内存，界面一行提示
-- ▶️ **回放与字幕联动** —— 停止后可回放本次录音：30 秒窗口解码、点任意字幕跳转到该句并高亮，播放条激活时空格键控制播放（不再误触录音）
-- ⏱ **逐段延迟埋点** —— 每句的「首字 / 定稿 / 精修」毫秒数逐段上报（首字以**语音起点**为原点，定稿与精修以**关句时刻**为原点，见「延迟口径」）
-- 🎨 **深色界面** —— 录音状态、实时波形、计时器、自动滚动字幕
-- ⌨️ **全键盘可用** —— 空格开始 / 停止，导出菜单支持方向键与 Esc
-- ♿ **读屏友好** —— 状态与字幕通过 live region 播报，错误使用 `role="alert"`
+- 💾 **边录边落盘** —— 音频分片写入浏览器 OPFS，录音期间内存占用与时长无关，隐私模式自动降级
+- ▶️ **回放与字幕联动** —— 点任意字幕跳转播放并高亮，播放条激活时空格控制播放
+- ⏱ **逐段延迟埋点** —— 每句的「首字 / 定稿 / 精修」毫秒数逐段上报（见「延迟口径」）
+- 🎨 **深色界面** · ⌨️ **全键盘可用** · ♿ **读屏友好**
 
 ![EchoNote 界面](docs/screenshot.png)
 
@@ -43,6 +46,63 @@
 > 并为定稿过程加了「精修中 / 已精修」标记。全套流程见
 > `docs/screenshots/`：空态 → 录音中 → 停止后字幕 → 导出菜单 → 窄屏。
 > 该次录音导出的四种文件在 `docs/examples/`。
+
+---
+
+## 🏗 架构
+
+**桌面版**：Python 服务承载切句与识别，浏览器只负责采集与展示。
+
+```mermaid
+flowchart LR
+    subgraph B["浏览器"]
+        MIC[麦克风] --> W["采集 Worklet（高通·陷波·AGC·重采样）"]
+        W -->|16kHz PCM 帧| UI[界面 / 波形 / 导出]
+    end
+    W -->|WebSocket| subgraph S["Python 服务（127.0.0.1:8000）"]
+        VAD["VAD 切句（自适应门限 / 情境预设）"] --> LIVE["实时字幕（zipformer 流式）"]
+        VAD --> FIN["定稿 + 精修（SenseVoice / Whisper / 远程）"]
+    end
+    LIVE -->|partial| UI
+    FIN -->|final / refine| UI
+```
+
+**移动版**：同一套前端，识别下沉到原生层——无服务器、模型下载后完全离线。
+
+```mermaid
+flowchart LR
+    subgraph C["Capacitor 壳（Android / iOS）"]
+        MIC2["麦克风 Worklet（同一套采集链）"] --> ENG["MobileEngine（VAD 移植 + 编排）"]
+        ENG <-->|Capacitor 桥| N["SherpaASR 原生插件（sherpa-onnx JNI）"]
+        N --> M1["zipformer 流式（字幕）"]
+        N --> M2["SenseVoice（定稿）"]
+    end
+    N -.首启模型下载（hf-mirror）.-> OFF["之后完全离线"]
+```
+
+VAD 与编排层的跨端移植由**双语言一致性测试**守护：同一份音频，Python 版与 JS 版必须切出相同的段落（`mobile/test/`，6 组样本含会议门限用例）。
+
+---
+
+## 🧠 引擎与基准
+
+本机实测（8.95 s 中文样音，个人模式，`tools/bench_cer.py` 可复现）：
+
+| 引擎 | 角色 | 耗时 | RTF | CER | 标点 |
+|---|---|---|---|---|---|
+| **SenseVoice int8** | 定稿/精修 | 2.0 s | 0.23 | 0.0% | ✅ 自动 |
+| zipformer 流式 | 实时字幕 | 6.1 s | 0.68 | 0.0% | ❌ |
+| whisper medium | 定稿（桌面可选） | 11.5 s | 1.28 | 0.0% | ✅ |
+
+SenseVoice 是 FunASR 系离线模型（zh/en/ja/ko/yue）：非自回归一次出整句，比逐 token 的 Whisper 快一个身位，且自带标点——这也是它成为 v1.0.0 默认定稿引擎之一的原因。切换入口：`ECHONOTE_ASR_BACKEND=sensevoice`。
+
+---
+
+## 📱 移动端
+
+- **Android App**：Capacitor 壳 + 原生 sherpa-onnx 插件（JNI），录音/转写/回放/导出全在手机本地，首启下载约 270 MB 模型后飞行模式可用。构建步骤与签名说明见 [mobile/README.md](mobile/README.md)。
+- **iPhone 免装体验**：`启动手机访问.bat` → Safari 扫码 → 信任证书 → 录音（与 Android 同源的前端），详见 [docs/手机访问指南.md](docs/手机访问指南.md)。
+- **原生 iOS 包**：Xcode 工程与 Swift 插件源码已就绪（`mobile/ios/`、`mobile/ios-plugin/`），构建需 Mac + Apple 开发者账号。
 
 ---
 
@@ -222,6 +282,8 @@ python tools/fetch_model.py --list
 | `ECHONOTE_MODEL_DIR` | `./models` | 模型目录 |
 | `ECHONOTE_OFFLINE` | 未设置 | 设为 `1` 后禁止一切联网；缺模型时立即报错并给出应放路径 |
 | `ECHONOTE_LANGUAGE` | `zh` | 默认语言，如 `zh`、`en`；`auto` 为自动识别 |
+| `ECHONOTE_ASR_BACKEND` | 自动 | 定稿引擎：`sensevoice`（v1.0.0 新增）/ `sherpa`（流式）/ `whisper` / `remote`（OpenAI 兼容接口） |
+| `ECHONOTE_MODE` | `personal` | 录入情境：`personal`（近讲低延迟）/ `meeting`（远场抗噪），界面可切并粘性记忆 |
 | `ECHONOTE_VAD_THRESHOLD` | `0.010` | 能量阈值。**数值越大越不灵敏**（更难触发），越小越容易把噪声当语音 |
 | `ECHONOTE_VAD_HANGOVER_MS` | `900` | 停顿多久算一句结束。按 30 ms 取整，**实际 900 ms** |
 | `ECHONOTE_VAD_MIN_SPEECH_MS` | `240` | 最短语音，按帧取整后**实际 240 ms**，更短的片段直接丢弃 |
@@ -592,12 +654,16 @@ CI 矩阵为 Python 3.10/3.11/3.12/3.13（Linux）+ Windows 3.10；**不支持 3
 
 ## 🗺 Roadmap
 
+- [x] Android 原生 App（Capacitor + sherpa-onnx 插件，离线识别）
+- [x] SenseVoice 定稿引擎与会议/个人情境模式
+- [x] 模型热切换（界面下拉，只加载本地文件）
+- [x] 桌面端打包（PyInstaller 便携包 + GitHub Actions 自动构建）
+- [ ] iOS 包（Xcode 工程与 Swift 插件源码就绪，待 Mac 构建签名）
+- [ ] 商店上架推进（Android 材料齐备，见 [docs/上架指南.md](docs/上架指南.md)）
 - [ ] 延迟达标（A 档 p95）与基准集 `zh-bench-v1`
 - [ ] 系统声音 / 双轨录制
 - [ ] 说话人分离（speaker diarization）
 - [ ] 本地历史记录与搜索（需先做隐私评审）
-- [ ] 模型热切换
-- [ ] 桌面端打包（Tauri）
 - [ ] 英文界面
 
 ---

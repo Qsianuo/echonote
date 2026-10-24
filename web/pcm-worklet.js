@@ -72,6 +72,13 @@ class PCM16Processor extends AudioWorkletProcessor {
         b0 = 1 / (1 + alpha); b1 = (-2 * cosW0) / (1 + alpha);
         b2 = 1 / (1 + alpha); a0 = 1;
         a1 = (-2 * cosW0) / (1 + alpha); a2 = (1 - alpha) / (1 + alpha);
+      } else if (type === 'lowpass') {
+        a0 = 1 + alpha;
+        b0 = (1 - cosW0) / 2 / a0;
+        b1 = (1 - cosW0) / a0;
+        b2 = (1 - cosW0) / 2 / a0;
+        a1 = (-2 * cosW0) / a0;
+        a2 = (1 - alpha) / a0;
       } else {
         // highpass
         a0 = 1 + alpha;

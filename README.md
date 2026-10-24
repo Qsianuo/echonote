@@ -24,7 +24,9 @@
 
 🎬 **30 秒宣传片**（边说边出字 · 四种导出 · 隐私承诺）：
 
-![EchoNote 宣传片](docs/promo/echonote-promo.mp4)
+![EchoNote 宣传片](docs/promo/echonote-promo.gif)
+
+▶️ [观看高清版视频（MP4，点开即播）](docs/promo/echonote-promo.mp4) · [Releases 页下载](https://github.com/Qsianuo/echonote/releases/latest)
 
 ---
 

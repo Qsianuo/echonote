@@ -63,9 +63,20 @@ jobs:
           node --check web/wav.js
           node --check web/pcm-worklet.js
 
-      # RG-03 (WAV header) + RG-15 (export golden samples) + RG-41 (input gain).
+      # RG-03 (WAV header) + RG-15 (export golden samples) + RG-41 (input gain)
+      # + OPFS store, playback scheduler, waveform peaks.
+      # 列出 tests/js/ 下全部文件：这里的列表是唯一的发现机制，新增文件忘了
+      # 加进来就等于永远不跑（audio-store / playback / waveform 的 34 个用例
+      # 此前就是这样漏掉的）。新增测试请同步追加。
       - name: Frontend unit tests
-        run: node --test tests/js/export.test.mjs tests/js/wav.test.mjs tests/js/pcm-worklet.test.mjs
+        run: >-
+          node --test
+          tests/js/export.test.mjs
+          tests/js/wav.test.mjs
+          tests/js/pcm-worklet.test.mjs
+          tests/js/audio-store.test.mjs
+          tests/js/playback.test.mjs
+          tests/js/waveform.test.mjs
 
   runtime:
     name: runtime imports

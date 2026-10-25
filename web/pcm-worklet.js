@@ -187,7 +187,12 @@ class PCM16Processor extends AudioWorkletProcessor {
     }
 
     if (written > 0) {
-      this.port.postMessage(out.buffer, [out.buffer]);
+      // 只发送实际写满的部分：out 预分配的是 maxOut（向上取整），尾部未写
+      // 的样本是 0——整块发送会让每个处理块往录音流里塞 1-2 个零样本，
+      // 344 块/秒的零插入就是用户听到的"滋滋"电流声（两台手机 + 桌面
+      // 全部中招的历史问题）。slice 产生恰好 written*2 字节的新缓冲。
+      const payload = out.slice(0, written);
+      this.port.postMessage(payload.buffer, [payload.buffer]);
     }
 
     // Keep the unconsumed tail, preserving the fractional position.

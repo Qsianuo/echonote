@@ -163,10 +163,39 @@ test('gain relaxes back to unity during a long pause', () => {
   assert.ok(processor.gain < 1.3, `gain should relax, got ${processor.gain.toFixed(2)}`);
 });
 
-test('gain never leaves the [1, 32] range', () => {
+test('gain never leaves the [1, 16] range', () => {
   const Processor = loadWorklet();
   const processor = new Processor();
   run(processor, utterance({ speechPeak: 1.0, gapPeak: 0.001 }));
   run(processor, utterance({ speechPeak: 0.0001, gapPeak: 0.00001 }));
-  assert.ok(processor.gain >= 1 && processor.gain <= 32, `gain out of range: ${processor.gain}`);
+  assert.ok(processor.gain >= 1 && processor.gain <= 16, `gain out of range: ${processor.gain}`);
+});
+
+test('no zero padding at block boundaries — every posted sample is real', () => {
+  // 回归：out 预分配的是 maxOut（向上取整），若把整个缓冲 postMessage，
+  // 未写满的尾部（恒为 0）会逐块进入录音流——44.1k 机器上每秒约 344 个
+  // 零断点，听感就是用户报告的持续"滋滋"电流声。以 48 kHz 原生率喂
+  // 0.5 s 正弦，输出总长必须贴合 3:1 降采样理论值，且全流几乎不存在
+  // 精确为 0 的采样。
+  const Processor = loadWorklet(48000);
+  const processor = new Processor();
+  const blocks = [];
+  for (let b = 0; b < 188; b += 1) {
+    const block = new Float32Array(128);
+    for (let i = 0; i < 128; i += 1) {
+      block[i] = 0.3 * Math.sin((2 * Math.PI * 441 * (b * 128 + i)) / 48000);
+    }
+    blocks.push(block);
+  }
+  const out = run(processor, blocks);
+  // 块级重采样每块重置小数尾巴：总输出落在 [连续理论值, 理论值+块数] 之间
+  //（每块 floor((128-1)/3)+1 = 43 个输出）。有块级零填充时会多出约一个块数。
+  const min = Math.floor((blocks.length * 128) / 3);
+  const max = min + blocks.length;
+  assert.ok(
+    out.length >= min && out.length <= max,
+    `output length ${out.length} outside [${min}, ${max}]`
+  );
+  const zeros = out.reduce((n, v) => n + (v === 0 ? 1 : 0), 0);
+  assert.ok(zeros < 10, `output carries ${zeros} exact-zero samples（块边界零填充）`);
 });

@@ -258,7 +258,7 @@ function install() {
 
     if (path === '/api/config') {
       return json({
-        version: '0.12.1-mobile',
+        version: '1.0.0-mobile',
         stage: 'tech-preview',
         protocol: '4',
         asr_backend: 'native',

@@ -1160,3 +1160,84 @@ dialog p b {
     max-height: none;
   }
 }
+
+/* ───────────────────────── 开机画面 ─────────────────────────
+   品牌底 + 声波 logo 呼吸 + 版本号；模型就绪淡出（首启模型下载时主动
+   让位给进度界面——见 app.js dismissSplash 的三个时机）。 */
+#splash {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: radial-gradient(circle at 50% 42%, #0b1830 0%, #060d1a 70%);
+  display: grid;
+  place-items: center;
+  transition: opacity 0.55s ease;
+}
+
+#splash.out {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.splash-inner {
+  display: grid;
+  place-items: center;
+  gap: 14px;
+  transform: translateY(-4vh);
+}
+
+.splash-logo {
+  width: 108px;
+  height: 108px;
+  border-radius: 26px;
+  color: var(--accent);
+  display: grid;
+  place-items: center;
+  background: radial-gradient(circle at 32% 28%, rgba(100, 255, 218, 0.16), rgba(10, 25, 47, 0.9) 68%);
+  border: 1px solid rgba(100, 255, 218, 0.28);
+  box-shadow: 0 0 0 rgba(100, 255, 218, 0);
+  animation: splash-breathe 2.6s ease-in-out infinite;
+}
+
+@keyframes splash-breathe {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 18px rgba(100, 255, 218, 0.10);
+  }
+  50% {
+    transform: scale(1.05);
+    box-shadow: 0 0 44px rgba(100, 255, 218, 0.22);
+  }
+}
+
+.splash-title {
+  font-size: 22px;
+  letter-spacing: 0.06em;
+  color: #e8f1ff;
+  margin-top: 10px;
+}
+
+.splash-title span {
+  color: var(--accent);
+}
+
+.splash-tag {
+  font-size: 13px;
+  color: rgba(232, 241, 255, 0.55);
+  letter-spacing: 0.04em;
+}
+
+.splash-version {
+  font-size: 12px;
+  color: rgba(232, 241, 255, 0.35);
+  border: 1px solid rgba(232, 241, 255, 0.16);
+  border-radius: 999px;
+  padding: 3px 14px;
+  margin-top: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .splash-logo {
+    animation: none;
+  }
+}

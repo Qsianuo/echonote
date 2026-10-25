@@ -21,13 +21,28 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="apple-touch-icon" href="icon-512.png" />
-    <link rel="stylesheet" href="style.css?v=20261024l" />
+    <link rel="stylesheet" href="style.css?v=20261024m" />
   </head>
   <body>
     <div class="bg-grid" aria-hidden="true"></div>
     <div class="bg-glow" aria-hidden="true"></div>
 
     <a class="skip-link" href="#transcript">跳到转写内容</a>
+
+    <!-- 开机画面：紧跟 <body> 使其先于一切脚本绘制。淡出时机见 app.js
+         dismissSplash（模型就绪 / 首启下载让位 / 4 s 兜底）。 -->
+    <div id="splash" aria-hidden="true">
+      <div class="splash-inner">
+        <div class="splash-logo">
+          <svg viewBox="0 0 24 24" width="72" height="72" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+            <path d="M4 10v4M8 6v12M12 3v18M16 7v10M20 10v4" />
+          </svg>
+        </div>
+        <div class="splash-title">EchoNote <span>声记</span></div>
+        <div class="splash-tag">录音与识别，都在你的设备上</div>
+        <div class="splash-version">v1.0.0</div>
+      </div>
+    </div>
 
     <header class="topbar">
       <div class="brand">
@@ -260,8 +275,8 @@
          检测到 Capacitor 才拦截 fetch/WebSocket；桌面环境加载等于空操作。
          必须在 app.js 的 boot() 之前生效——所以 boot 挂在
          DOMContentLoaded 上。 -->
-    <script src="transport.js?v=20261024l"></script>
-    <script type="module" src="native-boot.js?v=20261024l"></script>
-    <script src="app.js?v=20261024l"></script>
+    <script src="transport.js?v=20261024m"></script>
+    <script type="module" src="native-boot.js?v=20261024m"></script>
+    <script src="app.js?v=20261024m"></script>
   </body>
 </html>

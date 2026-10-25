@@ -723,6 +723,23 @@
     return `实时 ${live} · 定稿 ${final}`;
   }
 
+  /**
+   * 开机画面的三个退场时机（任一先到即淡出）：
+   *  1. 模型就绪——正常路径，品牌画面完整展示；
+   *  2. 首启模型下载开始——主动让位，进度条比品牌动画重要（原生壳首启
+   *     下载要数分钟，挡住进度等于故障）；
+   *  3. 4 s 兜底——慢机器/异常时也要让用户进入可操作的界面。
+   */
+  let splashDismissed = false;
+  function dismissSplash() {
+    if (splashDismissed) return;
+    splashDismissed = true;
+    const splash = document.getElementById('splash');
+    if (!splash) return;
+    splash.classList.add('out');
+    setTimeout(() => splash.remove(), 650);
+  }
+
   function applyStatus(message) {
     if (message.protocol && message.protocol !== PROTOCOL_VERSION) {
       // Reloading alone does not fix this: the page and the server ship
@@ -740,6 +757,9 @@
     el.footerModel.textContent = modelRoleText(message);
     setOfflineBadge(message.offline_ready);
     updateSpeedNotice(message);
+
+    if (message.download) dismissSplash(); // 让位给下载进度
+    if (message.ready) dismissSplash(); // 模型就绪
 
     if (message.error) {
       setModelPill('bad', '模型加载失败');
@@ -2580,6 +2600,9 @@
     state.reduceMotion =
       typeof window.matchMedia === 'function' &&
       window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    // 开机画面兜底：慢机器/状态流异常时 4 s 也退场（见 dismissSplash）。
+    setTimeout(dismissSplash, 4000);
 
     wf.measure();
     wf.drawIdle();

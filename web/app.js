@@ -501,16 +501,16 @@
   function connect() {
     if (
       state.ws &&
-      (state.ws.readyState === WebSocket.OPEN || state.ws.readyState === WebSocket.CONNECTING)
+      (state.ws.readyState === EchoNoteTransport.OPEN ||
+        state.ws.readyState === EchoNoteTransport.CONNECTING)
     ) {
       return;
     }
 
     setConnPill('idle', '连接中');
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const lanToken = localStorage.getItem('echonote-token');
-    const query = lanToken ? `?token=${encodeURIComponent(lanToken)}` : '';
-    const ws = new WebSocket(`${proto}//${location.host}/ws${query}`);
+    // 传输层选择实现：桌面/局域网 = 服务器 WebSocket；原生壳 = 本地引擎。
+    // 局域网访问令牌由传输层从 localStorage 读取（captureLanToken 存入）。
+    const ws = EchoNoteTransport.openSession();
     ws.binaryType = 'arraybuffer';
     state.ws = ws;
 
@@ -577,7 +577,7 @@
   }
 
   function sendConfig() {
-    if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+    if (!state.ws || state.ws.readyState !== EchoNoteTransport.OPEN) return;
     state.ws.send(
       JSON.stringify({
         type: 'config',
@@ -789,7 +789,7 @@
 
   async function pollStatus() {
     try {
-      const res = await fetch('/api/ready', { cache: 'no-store' });
+      const res = await EchoNoteTransport.api('/api/ready', { cache: 'no-store' });
       if (res.ok) applyStatus(await res.json());
     } catch {
       /* server not up yet */
@@ -802,7 +802,7 @@
     setHint('正在重试加载模型…');
     announce('正在重试加载模型');
     try {
-      const res = await fetch('/api/retry', { method: 'POST' });
+      const res = await EchoNoteTransport.api('/api/retry', { method: 'POST' });
       if (res.ok) applyStatus(await res.json());
     } catch {
       setHint('重试请求失败，请确认服务仍在运行');
@@ -811,7 +811,7 @@
 
   async function loadConfig() {
     try {
-      const res = await fetch('/api/config', { cache: 'no-store' });
+      const res = await EchoNoteTransport.api('/api/config', { cache: 'no-store' });
       if (!res.ok) return;
       const config = await res.json();
 
@@ -871,7 +871,7 @@
   async function loadModels() {
     if (!el.modelSelect) return;
     try {
-      const res = await fetch('/api/models', { cache: 'no-store' });
+      const res = await EchoNoteTransport.api('/api/models', { cache: 'no-store' });
       if (!res.ok) return;
       const data = await res.json();
       const items = data.items || [];
@@ -906,7 +906,7 @@
     setHint('正在切换模型…');
     announce('正在切换识别模型');
     try {
-      const res = await fetch('/api/model', {
+      const res = await EchoNoteTransport.api('/api/model', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key }),
@@ -1128,7 +1128,7 @@
     el.recordBtn.setAttribute('aria-label', '开始录音');
 
     flushAudioBuffer();
-    if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+    if (state.ws && state.ws.readyState === EchoNoteTransport.OPEN) {
       state.ws.send(JSON.stringify({ type: 'flush' }));
     }
     // 收尾落盘（flush + close 后把 .tmp 改名成 .pcm）；不 await——导出与读取
@@ -1191,7 +1191,7 @@
     }
     // 冲一句话尾：把说到一半的句子立即定稿，别让半句字幕挂在暂停的
     // 界面上直到恢复才落地。
-    if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+    if (state.ws && state.ws.readyState === EchoNoteTransport.OPEN) {
       state.ws.send(JSON.stringify({ type: 'flush' }));
     }
     if (el.pauseBtn) {
@@ -1360,7 +1360,7 @@
     // 记账永远成功（PcmLedger 不丢音频），落盘与转发都不受预算影响。
     state.ledger.accept(frame);
     state.store.append(frame);
-    if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+    if (state.ws && state.ws.readyState === EchoNoteTransport.OPEN) {
       state.ws.send(frame.buffer);
     }
     checkMemory();
@@ -2473,7 +2473,7 @@
       const next = el.modeSelect.value;
       if (next === state.mode) return;
       try {
-        const res = await fetch('/api/mode', {
+        const res = await EchoNoteTransport.api('/api/mode', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ mode: next }),

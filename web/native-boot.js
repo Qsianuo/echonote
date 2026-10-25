@@ -1,24 +1,27 @@
 /**
- * EchoNote 原生壳适配层（Capacitor）。
+ * EchoNote 原生壳引导（Capacitor）。
  *
  * 只在 window.Capacitor 存在时激活；桌面/局域网环境加载本文件等于空操作。
- * 激活后做三件事，让现有 app.js 不改一行逻辑地跑在原生壳里：
  *
- *  1. 拦截 /api/* 的 fetch：config/ready/mode 等由本地引擎应答
- *     （原生壳里没有 FastAPI）；
- *  2. 用 NativeSocket 替换 window.WebSocket：音频帧进 MobileEngine，
- *     识别结果按服务端协议形状（partial/final/refine/done）回吐；
- *  3. 首启下载两个模型（streaming + final）到应用沙盒——下载在原生层
- *     流式写盘（SherpaASRPlugin.downloadModel），字节级进度经
- *     /api/ready 的 `download` 字段透出（app.js 据此显示进度条文案）。
+ * v1.0.0 起，原生集成走 **transport.js 的显式契约**（registerNative），
+ * 不再替换 window.WebSocket、不再拦截 fetch——传输层的会话与 /api 应答
+ * 在此注册，app.js 通过 EchoNoteTransport 使用它们。
+ *
+ * 职责：
+ *  1. 模型引导：首启下载两个模型（streaming + final）到应用沙盒——下载在
+ *     原生层流式写盘（SherpaASRPlugin.downloadModel），字节级进度经
+ *     /api/ready 的 `download` 字段透出（app.js 据此显示进度条文案）；
+ *  2. 识别引擎：MobileEngine（采集帧进，协议消息出）；
+ *  3. /api/* 本地应答：config / ready / mode / models / retry；
+ *  4. 麦克风运行时权限（getUserMedia 的前置）。
  *
  * 本文件是 ES 模块：在整页解析完之后、DOMContentLoaded 之前执行；
- * app.js 的 boot() 因此挂到 DOMContentLoaded，保证补丁先于启动安装。
+ * app.js 的 boot() 因此挂到 DOMContentLoaded，保证注册先于启动安装。
  */
 
-import { MobileEngine } from './native-engine.js?v=20261024g';
-import { MODES } from './native-vad.js?v=20261024g';
-import { sherpa } from './native-sherpa.js?v=20261024g';
+import { MobileEngine } from './native-engine.js?v=20261024l';
+import { MODES } from './native-vad.js?v=20261024l';
+import { sherpa } from './native-sherpa.js?v=20261024l';
 
 const isNative = typeof window !== 'undefined' && !!window.Capacitor;
 if (isNative) install();
@@ -29,7 +32,7 @@ function install() {
   let readyError = null;
   // 字节级下载进度（由 sherpa.ensureModel 的监听更新）。
   const download = { received: 0, total: 0, file: '', fileIndex: 0, fileCount: 0 };
-  let activeSocket = null;
+  let activeSession = null;
   let doneTimer = null;
   let lastStatusPush = 0;
 
@@ -41,7 +44,7 @@ function install() {
   });
   engine.setMode(localStorage.getItem('echonote-mode') || 'personal');
 
-  // ------------------------------------------------------ 模型下载
+  // ------------------------------------------------------ 模型引导
   async function loadModels() {
     if (ready) return;
     readyError = null;
@@ -71,7 +74,7 @@ function install() {
     download.file = event.file || '';
     download.fileIndex = event.fileIndex || 0;
     download.fileCount = event.fileCount || 0;
-    // 节流：进度事件很密，状态推送 500 ms 一次足够（app.js 还有 5 s 轮询兜底）。
+    // 节流：进度事件很密，状态推送 500 ms 一次足够（UI 还有 5 s 轮询兜底）。
     const now = Date.now();
     if (now - lastStatusPush > 500) pushStatus(true);
   }
@@ -142,226 +145,7 @@ function install() {
     })
     .catch((error) => console.warn('[native-boot] 麦克风权限请求失败:', error));
 
-  // -------------------------------------------------- 演示音源（?demo）
-  //
-  // 模拟器/无麦环境下的确定性测试通道：demo 模式把 AudioWorkletNode 换成
-  // 假节点，录音开始后按 100 ms 帧把 web/sample.wav（真实人声 16 kHz PCM）
-  // 灌进 handlePcm——账本、落盘、波形时间线、识别管线全部照常工作，导出
-  // 与回放也都是这段真实音频。真实手机不带 ?demo 时不受影响。
-  //   激活：URL 带 ?demo=1（或 localStorage.echonote-demo=1，激活后记住），
-  //   每段录音里把样本循环播两遍后停。
-  const demoRequested =
-    new URLSearchParams(location.search).has('demo') ||
-    localStorage.getItem('echonote-demo') === '1';
-  if (demoRequested) localStorage.setItem('echonote-demo', '1');
-
-  if (demoRequested) {
-    const RealWorkletNode = window.AudioWorkletNode;
-    let demoTimer = null;
-    let demoHandler = null;
-    window.AudioWorkletNode = function (_ctx, name, opts) {
-      // 图连接需要真节点（app.js 会把麦克风源连上来）；demo 只劫持输出：
-      // 真 port 的 onmessage 永远不会被设置，真实帧（模拟器里是静音）被
-      // 屏蔽，demo 帧经垫片进 handlePcm。
-      const real = new RealWorkletNode(_ctx, name, opts);
-      if (name !== 'pcm16') return real;
-      const shim = {
-        set onmessage(fn) {
-          demoHandler = fn;
-          startDemoFeed();
-        },
-        get onmessage() {
-          return demoHandler;
-        },
-        postMessage(msg) {
-          real.port.postMessage(msg);
-        },
-      };
-      Object.defineProperty(real, 'port', { value: shim, configurable: true });
-      return real;
-    };
-
-    async function startDemoFeed() {
-      if (demoTimer) {
-        clearInterval(demoTimer);
-        demoTimer = null;
-      }
-      if (!ready) return; // 模型没就绪不喂音，录音会自己报 model_not_ready
-      try {
-        const res = await realFetch('sample.wav?v=' + ASSET_VERSION);
-        const buf = await res.arrayBuffer();
-        const view = new DataView(buf);
-        // 极简 WAV 解析：找 data 块（PCM16 mono 16k，本项目的固定格式）。
-        let offset = 12;
-        let pcm = null;
-        while (offset + 8 <= view.byteLength) {
-          const id = String.fromCharCode(
-            view.getUint8(offset),
-            view.getUint8(offset + 1),
-            view.getUint8(offset + 2),
-            view.getUint8(offset + 3)
-          );
-          const size = view.getUint32(offset + 4, true);
-          if (id === 'data') {
-            pcm = new Int16Array(buf, offset + 8, Math.floor(size / 2));
-            break;
-          }
-          offset += 8 + size + (size % 2);
-        }
-        if (!pcm) return;
-        const frameSize = 1600; // 100 ms
-        const loops = 2;
-        let pos = 0;
-        demoTimer = setInterval(() => {
-          const frame = new Int16Array(frameSize);
-          for (let i = 0; i < frameSize; i++) {
-            if (pos >= pcm.length * loops) {
-              clearInterval(demoTimer);
-              demoTimer = null;
-              break;
-            }
-            frame[i] = pcm[pos % pcm.length] || 0;
-            pos += 1;
-          }
-          if (demoHandler) demoHandler({ data: frame.buffer });
-        }, 100);
-      } catch (error) {
-        console.warn('[native-boot] 演示音源失败:', error);
-      }
-    }
-  }
-
-  // --------------------------------------------------------- fetch 拦截
-  const realFetch = window.fetch.bind(window);
-  window.fetch = (input, init) => {
-    const url = typeof input === 'string' ? input : (input && input.url) || String(input);
-    if (url && url.startsWith('/api/')) return api(url, init);
-    return realFetch(input, init);
-  };
-
-  function json(body, status = 200) {
-    return new Response(JSON.stringify(body), {
-      status,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  async function api(url, init) {
-    const method = ((init && init.method) || 'GET').toUpperCase();
-    const path = url.split('?')[0];
-    let body = null;
-    try {
-      body = init && init.body ? JSON.parse(init.body) : null;
-    } catch {
-      body = null;
-    }
-
-    if (path === '/api/config') {
-      return json({
-        version: '1.0.0-mobile',
-        stage: 'tech-preview',
-        protocol: '4',
-        asr_backend: 'native',
-        model: 'native',
-        model_label: '本地识别',
-        model_key: 'native',
-        offline_ready: true,
-        offline_mode: true,
-        sample_rate: 16000,
-        language: 'zh',
-        languages: LANGUAGES,
-        live_step_s: 0.6,
-        live_captions: true,
-        live_model: 'native',
-        live_model_key: 'native',
-        live_model_label: '本地流式',
-        live_separate: true,
-        refine: true,
-        max_record_minutes: 90,
-        min_frame_ms: 100,
-        max_frame_bytes: 32768,
-        mode: engine.mode,
-        hotwords: '',
-      });
-    }
-    if (path === '/api/ready' || path === '/api/status') return json(statusPayload());
-    if (path === '/api/models')
-      return json({ current: 'native', current_path: null, offline_ready: true, items: [] });
-    if (path === '/api/mode' && method === 'POST') {
-      const name = body && body.mode;
-      if (!MODES[name]) return json({ ok: false, error: `未知模式 ${name}` }, 400);
-      engine.setMode(name);
-      localStorage.setItem('echonote-mode', name);
-      return json({ ok: true, mode: name });
-    }
-    if (path === '/api/model')
-      return json({ ok: false, error: '移动端使用内置模型，无需选择' }, 400);
-    if (path === '/api/retry') {
-      loadModels();
-      return json(statusPayload());
-    }
-    return json({ ok: false, error: '原生壳内不提供该接口' }, 404);
-  }
-
-  // ------------------------------------------------------- WebSocket 替换
-  class NativeSocket {
-    constructor(url) {
-      this.url = url;
-      this.readyState = NativeSocket.OPEN;
-      this.binaryType = 'arraybuffer';
-      this._listeners = {};
-      activeSocket = this;
-      // open 异步派发：connect() 在构造之后才挂监听器。顺手补发一次当前
-      // 状态——install 时的 pushStatus 那时还没有监听者，不补发的话首屏
-      // 只能等下一次轮询。
-      queueMicrotask(() => {
-        this._emit('open', { target: this });
-        pushStatus(true);
-      });
-    }
-
-    addEventListener(type, fn) {
-      (this._listeners[type] = this._listeners[type] || []).push(fn);
-    }
-
-    removeEventListener(type, fn) {
-      const list = this._listeners[type] || [];
-      const i = list.indexOf(fn);
-      if (i >= 0) list.splice(i, 1);
-    }
-
-    send(data) {
-      if (typeof data === 'string') {
-        handleJson(data);
-      } else if (data instanceof ArrayBuffer) {
-        handleAudio(data);
-      }
-    }
-
-    close() {
-      if (this.readyState === NativeSocket.CLOSED) return;
-      this.readyState = NativeSocket.CLOSED;
-      if (activeSocket === this) activeSocket = null;
-      engine.endSession();
-      this._emit('close', { target: this });
-    }
-
-    _emit(type, event) {
-      for (const fn of this._listeners[type] || []) {
-        try {
-          fn({ target: this, ...event });
-        } catch (error) {
-          console.error('[native-boot] listener failed:', error);
-        }
-      }
-    }
-  }
-  NativeSocket.CONNECTING = 0;
-  NativeSocket.OPEN = 1;
-  NativeSocket.CLOSING = 2;
-  NativeSocket.CLOSED = 3;
-  window.WebSocket = NativeSocket;
-
+  // ------------------------------------------------ 会话与 /api 应答
   function handleJson(text) {
     let msg;
     try {
@@ -406,9 +190,71 @@ function install() {
   }
 
   function emit(obj) {
-    if (activeSocket) {
-      activeSocket._emit('message', { data: JSON.stringify(obj) });
+    if (activeSession) activeSession._emit('message', { data: JSON.stringify(obj) });
+  }
+
+  function json(body, status = 200) {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  async function api(url, init) {
+    const method = ((init && init.method) || 'GET').toUpperCase();
+    const path = url.split('?')[0];
+    let body = null;
+    try {
+      body = init && init.body ? JSON.parse(init.body) : null;
+    } catch {
+      body = null;
     }
+
+    if (path === '/api/config') {
+      return json({
+        version: '1.0.0-mobile',
+        stage: 'release',
+        protocol: '4',
+        asr_backend: 'native',
+        model: 'native',
+        model_label: '本地识别',
+        model_key: 'native',
+        offline_ready: true,
+        offline_mode: true,
+        sample_rate: 16000,
+        language: 'zh',
+        languages: LANGUAGES,
+        live_step_s: 0.6,
+        live_captions: true,
+        live_model: 'native',
+        live_model_key: 'native',
+        live_model_label: '本地流式',
+        live_separate: true,
+        refine: true,
+        max_record_minutes: 90,
+        min_frame_ms: 100,
+        max_frame_bytes: 32768,
+        mode: engine.mode,
+        hotwords: '',
+      });
+    }
+    if (path === '/api/ready' || path === '/api/status') return json(statusPayload());
+    if (path === '/api/models')
+      return json({ current: 'native', current_path: null, offline_ready: true, items: [] });
+    if (path === '/api/mode' && method === 'POST') {
+      const name = body && body.mode;
+      if (!MODES[name]) return json({ ok: false, error: `未知模式 ${name}` }, 400);
+      engine.setMode(name);
+      localStorage.setItem('echonote-mode', name);
+      return json({ ok: true, mode: name });
+    }
+    if (path === '/api/model')
+      return json({ ok: false, error: '移动端使用内置模型，无需选择' }, 400);
+    if (path === '/api/retry') {
+      loadModels();
+      return json(statusPayload());
+    }
+    return json({ ok: false, error: '原生壳内不提供该接口' }, 404);
   }
 
   // 与 main.py 的 LANGUAGES 保持一致（原生壳内 SenseVoice 自动识别语言，
@@ -420,4 +266,24 @@ function install() {
     { code: 'ja', label: '日本語' },
     { code: 'ko', label: '한국어' },
   ];
+
+  // ------------------------------------------------ 注册到传输层
+  EchoNoteTransport.registerNative({
+    /** 会话打开（app.js 刚拿到会话对象）：补发一次当前状态。 */
+    onSessionOpen() {
+      pushStatus(true);
+    },
+    /** app.js 发来的 JSON 帧（config / flush）。 */
+    onJSON(text) {
+      handleJson(text);
+    },
+    /** app.js 发来的音频帧（Int16Array.buffer）。 */
+    onAudio(buffer) {
+      handleAudio(buffer);
+    },
+    closeSession() {
+      engine.endSession();
+    },
+    api,
+  });
 }

@@ -214,12 +214,18 @@ def _app_mode_browser() -> str | None:
     return _registry_browser("msedge.exe") or _registry_browser("chrome.exe")
 
 
-def _focus_existing(title_hint: str = "EchoNote") -> bool:
+def _focus_existing(title_hint: str = "声记") -> bool:
     """Bring an already-running EchoNote window to the front.
 
     A second double-click used to open another tab, which reads as "the app
     forgot it was running". Enumerating top-level windows is the only way to
     reach a window this process does not own.
+
+    The hint is 「声记」rather than 「EchoNote」 on purpose: the app window's
+    title is the page title ("EchoNote 声记 · 本地实时录音转写"), while a
+    File-Explorer window showing the install folder is titled "EchoNote…"
+    (the folder name). Matching on "EchoNote" made the second double-click
+    "focus" the folder window — visibly a no-op, reported as "双击没反应".
     """
     if sys.platform != "win32":
         return False

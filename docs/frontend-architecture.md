@@ -65,8 +65,14 @@
    按「先叶子后主干」推进，每步跑 tests/js + 模拟器 demo 端到端；app.js 单
    体在其间保持可用。
 
-2. **双版本号**：`ASSET_VERSION`（资源缓存）与 `APP_VERSION`（config.py）需
-   同步递增，靠人工记忆——Stage 2 顺带收敛到一处。
+2. ~~**双版本号**：`ASSET_VERSION`（资源缓存）与 `APP_VERSION`（config.py）需
+   同步递增，靠人工记忆——Stage 2 顺带收敛到一处。~~
+   **已于 2026-10-25 收敛**：`app.js` 的 `ASSET_VERSION`、`index.html` 的 `?v=`、
+   `native-boot.js` / `native-engine.js` 的 import specifier 现在全部由
+   `tools/bump_asset_version.py` 按**资源内容哈希**生成（一条命令重写全部载体），
+   `tests/test_asset_version.py` 兜住漂移。顺带修掉一个隐性 bug：两个原生模块曾
+   用不同 `?v=` 引入 `native-vad.js`，浏览器会当成两个模块（两份 `MODES`、两个
+   `Segmenter`）。仍需人工维护的只剩 `APP_VERSION`（用户可见版本号）。
 
 3. **全局命名空间**：领域模块用 window 全局通信（历史模式），Stage 2 拆分
    时一并改为 ES imports。

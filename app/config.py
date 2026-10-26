@@ -63,7 +63,7 @@ ROOT_DIR = _data_dir()
 # APP_VERSION, never with the document.
 # --------------------------------------------------------------------------
 
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 APP_STAGE = "release"
 
 

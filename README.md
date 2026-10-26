@@ -8,7 +8,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![ASR](https://img.shields.io/badge/ASR-SenseVoice%20%7C%20zipformer%20%7C%20Whisper-412991?style=flat-square)](#-引擎与基准)
 [![License](https://img.shields.io/badge/License-MIT-64ffda?style=flat-square)](LICENSE)
-[![Release](https://img.shields.io/badge/release-v1.0.1-64ffda?style=flat-square)](#-快速开始)
+[![Release](https://img.shields.io/badge/release-v1.0.2-64ffda?style=flat-square)](#-快速开始)
 [![Android](https://img.shields.io/badge/Android-App%20Ready-3DDC84?style=flat-square&logo=android&logoColor=white)](mobile/README.md)
 
 边说边出字 · 录音不上传 · 装好模型后完全离线 · 支持中英日韩等多语言
@@ -17,7 +17,7 @@
 
 ---
 
-> **v1.0.1**：桌面版（Windows 便携包 / 源码）与 **Android App**（Capacitor + 原生
+> **v1.0.2**：桌面版（Windows 便携包 / 源码）与 **Android App**（Capacitor + 原生
 > sherpa-onnx，离线识别）双端形态，iOS 工程已就绪。老规矩三件事：**实验性**；
 > **延迟取决于硬件**（本机实测首字 2.8 s、停顿后 1 s 出定稿，见下文口径）；
 > **首次准备要下载模型**（桌面双档 / 手机约 270 MB），之后可完全断网运行。

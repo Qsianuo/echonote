@@ -7,7 +7,7 @@
   const PROTOCOL_VERSION = '4';
   // 静态资源版本号：与 index.html 里 style.css / app.js 的 ?v= 保持一致。
   // 改动前端文件时同步递增，浏览器才会重新拉取（worklet 模块同样受缓存）。
-  const ASSET_VERSION = "0861e95e7d";
+  const ASSET_VERSION = "7d8685d31d";
   const RECONNECT_BASE_MS = 1500;
   const RECONNECT_MAX_MS = 15000;
   const RECONNECT_ATTEMPTS_CAP = 4;
@@ -997,11 +997,20 @@
 
     let stream;
     try {
+      // 会议（远场）模式关掉浏览器自带的降噪与回声消除。
+      //
+      // 这两项是 WebRTC 的近场通话算法：信噪比一低，它们会把语音的
+      // 1–3 kHz 一起当噪声压掉，而那正是辅音和可懂度所在的频段。实测证据：
+      // 同一台电脑、同一个内置麦、同一间教室，Windows 录音机（raw 采集）
+      // 听得清，而本项目录出的文件 1–3 kHz 只剩 2.6%（正常语音约 21%）、
+      // 频谱质心 414 Hz 对 936 Hz；worklet 自身的滤波链已用真实语音样本
+      // 复算，对这种倾斜的贡献只有 0.5 个百分点，可以排除。
+      const farField = (state.mode || (el.modeSelect && el.modeSelect.value)) === 'meeting';
       stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
+          echoCancellation: !farField,
+          noiseSuppression: !farField,
           // Off on purpose: the worklet applies its own bounded gain
           // (amplify-only, ≤ +12 dB, peak target −6 dBFS). Chrome's AGC is
           // tuned for calls and attenuates as readily as it boosts, which is

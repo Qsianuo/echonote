@@ -12,8 +12,8 @@
  *  · 定稿永远用 SenseVoice（离线、带标点）；流式文本只做字幕与兜底。
  */
 
-import { Segmenter, MODES } from './native-vad.js?v=0861e95e7d';
-import { sherpa } from './native-sherpa.js?v=0861e95e7d';
+import { Segmenter, MODES } from './native-vad.js?v=7d8685d31d';
+import { sherpa } from './native-sherpa.js?v=7d8685d31d';
 
 const LIVE_STEP_S = 0.6;
 const MIN_FIRST_DECODE_S = 2.0;

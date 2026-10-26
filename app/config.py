@@ -645,6 +645,34 @@ HOTWORDS = (
     or DEFAULT_HOTWORDS
 ) or None
 
+
+# --------------------------------------------------------------------------
+# Term glossary（定稿后纠错用，和 HOTWORDS 是两件事）
+#
+# hotwords 是*解码提示*，词必须在模型词表里——流式 zipformer 只有 2002 个
+# token，「焦」「曝」「匹」「伺」都不在表里，所以工业术语喂热词会被静默丢弃
+# （实测 18 个候选词丢 7 个）。术语表是*解码之后*的同音替换，不受词表限制：
+# 「脚距」→「焦距」、「暴光」→「曝光」。
+#
+# 文件：models/glossary.txt，一行一个词，# 开头注释。
+# --------------------------------------------------------------------------
+def _terms_file() -> list[str]:
+    path = Path(MODEL_DIR) / "glossary.txt"
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    terms: list[str] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        terms.extend(word for word in line.split() if len(word) >= 2)
+    return terms
+
+
+GLOSSARY_TERMS = _terms_file()
+
 # faster-whisper truncates hotwords to ``max_length // 2`` tokens (224 for the
 # multilingual tokenizer) and does it *silently*, so a long glossary loses its
 # tail with no visible symptom. Chinese is roughly one token per character plus

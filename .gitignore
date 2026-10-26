@@ -14,6 +14,8 @@ coverage.xml
 
 # Whisper models (downloaded on first run)
 models/
+# 术语表是领域配置，不是模型权重——必须入库。
+!models/glossary.txt
 
 # Runtime data / recordings / test output
 data/

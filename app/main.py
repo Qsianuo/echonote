@@ -24,7 +24,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from . import asr_sensevoice, asr_sherpa, config, models, protocol, stt
+from . import asr_sensevoice, asr_sherpa, config, glossary, models, protocol, stt
 from .live import LiveCaptioner
 from .timing import TurnTiming
 from .vad import Segmenter
@@ -489,7 +489,12 @@ class StreamingSession:
         return stt.transcribe_live(audio, self.language, hotwords=self.hotwords)
 
     def _decode_final(self, audio: np.ndarray) -> str:
-        return stt.transcribe(audio, self.language, hotwords=self.hotwords)
+        text = stt.transcribe(audio, self.language, hotwords=self.hotwords)
+        # 术语纠错放在定稿这一步：只有这里拿得到完整句子，也只能改"最终文本"，
+        # 不动实时字幕（边出字时句子还在长，纠错会在半句上误判）。
+        if text and config.GLOSSARY_TERMS:
+            text = glossary.correct(text, config.GLOSSARY_TERMS)
+        return text
 
     def _emit_partial(self, text: str, start_s: float) -> None:
         self._last_partial = text

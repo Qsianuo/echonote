@@ -14,3 +14,5 @@ httpx>=0.27,<1
 # "recognizer ready (… ms)" line in logs/echonote.log.
 sherpa-onnx==1.13.8
 onnxruntime==1.23.2
+# 术语纠错（app/glossary.py）：按同音把「脚距」还原成「焦距」。
+pypinyin==0.55.0

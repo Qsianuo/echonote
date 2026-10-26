@@ -7,7 +7,7 @@
   const PROTOCOL_VERSION = '4';
   // 静态资源版本号：与 index.html 里 style.css / app.js 的 ?v= 保持一致。
   // 改动前端文件时同步递增，浏览器才会重新拉取（worklet 模块同样受缓存）。
-  const ASSET_VERSION = "7d8685d31d";
+  const ASSET_VERSION = "3f004ed30c";
   const RECONNECT_BASE_MS = 1500;
   const RECONNECT_MAX_MS = 15000;
   const RECONNECT_ATTEMPTS_CAP = 4;
@@ -34,6 +34,7 @@
     recordBtn: document.getElementById('record-btn'),
     timer: document.getElementById('timer'),
     hint: document.getElementById('hint'),
+    liveStatus: document.getElementById('live-status'),
     modelTag: document.getElementById('model-tag'),
     footerModel: document.getElementById('footer-model'),
     versionTag: document.getElementById('version-tag'),
@@ -139,6 +140,10 @@
     storageErrorWarned: false,
     audioBuffer: new Int16Array(0),
     finals: [],
+    // 转写成功的可见证据：段数、字数、最近一次出字的时间戳。
+    liveCount: 0,
+    liveChars: 0,
+    liveLastAt: 0,
     finalIds: new Set(),
     partial: '',
     lastPartialText: '',
@@ -1304,6 +1309,10 @@
     }
     state.audioBuffer = new Int16Array(0);
     state.finals = [];
+    state.liveCount = 0;
+    state.liveChars = 0;
+    state.liveLastAt = 0;
+    state.liveStartedAt = Date.now();
     state.finalIds.clear();
     rowIndex.clear();
     state.partial = '';
@@ -1477,6 +1486,28 @@
 
   /* ─────────────────────────── transcript ─────────────────────────── */
 
+  /** 每秒刷新「正在听 · 已 N 段 / M 字 · 最近 X 秒前」。 */
+  function renderLiveStatus() {
+    if (!el.liveStatus) return;
+    if (!state.recording) {
+      el.liveStatus.textContent = '';
+      return;
+    }
+    const tail = state.liveLastAt
+      ? `最近 ${Math.max(0, Math.round((Date.now() - state.liveLastAt) / 1000))} 秒前`
+      : '还没有出字';
+    // 15 秒还没出过字，直接给方向而不是让人干等：远场最常见的失败就是
+    // 声音进不来，界面沉默会被误读成"程序坏了"。
+    if (state.liveCount === 0 && Date.now() - state.liveStartedAt > 15000) {
+      el.liveStatus.textContent =
+        '还没出字 · 可能是声音太小或太远，试试让说话人靠近麦克风';
+      return;
+    }
+    el.liveStatus.textContent =
+      `正在听 · 已 ${state.liveCount} 段 / ${state.liveChars} 字 · ${tail}`;
+  }
+  setInterval(renderLiveStatus, 1000);
+
   function onFinal(message) {
     if (!message.id || state.finalIds.has(message.id)) return; // FR-010 AC5
     state.finalIds.add(message.id);
@@ -1495,6 +1526,9 @@
     };
 
     state.finals.push(item);
+    state.liveCount += 1;
+    state.liveChars += String(item.text || '').length;
+    state.liveLastAt = Date.now();
     state.partial = '';
     state.lastPartialText = '';
     appendFinal(item);
@@ -1666,6 +1700,10 @@
     const message = '清空当前转写文本？录音音频会保留，仍可导出 WAV。';
     if (ask && state.finals.length > 0 && !window.confirm(message)) return;
     state.finals = [];
+    state.liveCount = 0;
+    state.liveChars = 0;
+    state.liveLastAt = 0;
+    state.liveStartedAt = Date.now();
     state.finalIds.clear();
     rowIndex.clear();
     state.partial = '';

@@ -21,7 +21,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="apple-touch-icon" href="icon-512.png" />
-    <link rel="stylesheet" href="style.css?v=7d8685d31d" />
+    <link rel="stylesheet" href="style.css?v=3f004ed30c" />
   </head>
   <body>
     <div class="bg-grid" aria-hidden="true"></div>
@@ -101,6 +101,8 @@
           </div>
           <div class="timer" id="timer">00:00</div>
           <div class="hint" id="hint">正在准备模型…</div>
+          <!-- 转写是否在成功：数字在涨就是在工作，不动就是没在收。 -->
+          <div class="hint" id="live-status" aria-live="polite"></div>
         </div>
 
         <canvas id="waveform" height="92" aria-hidden="true"></canvas>
@@ -275,8 +277,8 @@
          检测到 Capacitor 才拦截 fetch/WebSocket；桌面环境加载等于空操作。
          必须在 app.js 的 boot() 之前生效——所以 boot 挂在
          DOMContentLoaded 上。 -->
-    <script src="transport.js?v=7d8685d31d"></script>
-    <script type="module" src="native-boot.js?v=7d8685d31d"></script>
-    <script src="app.js?v=7d8685d31d"></script>
+    <script src="transport.js?v=3f004ed30c"></script>
+    <script type="module" src="native-boot.js?v=3f004ed30c"></script>
+    <script src="app.js?v=3f004ed30c"></script>
   </body>
 </html>

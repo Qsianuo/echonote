@@ -622,10 +622,16 @@ def status() -> dict:
         "ready": _ready.is_set(),
         "model": target.loader_value,
         "error": _error,
-        "retrying": bool(_loading or _pending_loads),
+        # ``retrying`` means "the last load failed and another attempt is
+        # scheduled". It used to be true for *any* load in flight, so a normal
+        # cold start announced "正在重试（第 1 次）" — there was no retry, only a
+        # slow model load, and the wording sent people hunting for a fault that
+        # did not exist. ``loading`` is the honest "working on it" flag.
+        "retrying": bool(_auto_retries > 0 and (_loading or _pending_loads)),
+        "loading": bool(_loading or _pending_loads),
         "attempts": attempts,
         "auto_retry_exhausted": bool(_error is not None and _auto_retries >= MAX_AUTO_RETRIES),
-        # Progress hint for the UI ("正在重试（第 n 次）").
+        # 1-based progress hint for "正在重试（第 n 次）"; 0 = never retried.
         "retry_count": _auto_retries,
         "model_label": target.label,
         "model_key": target.key,

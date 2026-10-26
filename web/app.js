@@ -7,7 +7,7 @@
   const PROTOCOL_VERSION = '4';
   // 静态资源版本号：与 index.html 里 style.css / app.js 的 ?v= 保持一致。
   // 改动前端文件时同步递增，浏览器才会重新拉取（worklet 模块同样受缓存）。
-  const ASSET_VERSION = "c47ff76d24";
+  const ASSET_VERSION = "0861e95e7d";
   const RECONNECT_BASE_MS = 1500;
   const RECONNECT_MAX_MS = 15000;
   const RECONNECT_ATTEMPTS_CAP = 4;
@@ -787,8 +787,11 @@
       // Don't stomp on "已停止 · 可导出" every poll once a take exists.
       if (!state.recording && !state.endedAt) setHint('点击开始录音');
     } else {
+      // Cold start: the weights are being read off the disk. Nothing is wrong,
+      // so say what is happening instead of leaving "正在准备模型…" forever —
+      // on a slow machine this step alone can last a minute or two.
       setModelPill('idle', '模型加载中');
-      setHint('正在准备模型…');
+      setHint('正在加载模型，首次启动较慢，请稍等…');
       if (el.modelNotice) el.modelNotice.hidden = false;
     }
 

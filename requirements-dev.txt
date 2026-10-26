@@ -10,3 +10,5 @@ httpx>=0.27,<1
 # Packaging the portable Windows build (see packaging/build.ps1).
 # Not in requirements.txt: end users never install this.
 pyinstaller>=6.20,<7
+# app/glossary.py 在导入期就用它，测试收集就会失败——必须列在这里。
+pypinyin==0.55.0

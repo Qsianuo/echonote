@@ -10,6 +10,7 @@ public class MainActivity extends BridgeActivity {
         // （上次注册缺失的教训：写入命令链被失败的 cp 短路，构建照常成功，
         // 运行时报“插件不可用”——这次写完必须回读验证。）
         registerPlugin(SherpaASRPlugin.class);
+        registerPlugin(SherpaMTPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

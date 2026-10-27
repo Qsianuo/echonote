@@ -19,9 +19,9 @@
  * app.js 的 boot() 因此挂到 DOMContentLoaded，保证注册先于启动安装。
  */
 
-import { MobileEngine } from './native-engine.js?v=f51f3592fa';
-import { MODES } from './native-vad.js?v=f51f3592fa';
-import { sherpa } from './native-sherpa.js?v=f51f3592fa';
+import { MobileEngine } from './native-engine.js?v=c673077411';
+import { MODES } from './native-vad.js?v=c673077411';
+import { sherpa } from './native-sherpa.js?v=c673077411';
 import { mt } from './native-translate.js';
 
 const isNative = typeof window !== 'undefined' && !!window.Capacitor;
@@ -37,16 +37,27 @@ function install() {
   let doneTimer = null;
   let lastStatusPush = 0;
 
-  // 翻译引擎探测：插件缺席（本轮 Android 未实现原生翻译）时 targets 为空，
-  // app.js 据此隐藏「译文语言」下拉。探测结果缓存，config 时同步读。
+  // 翻译引擎探测：插件缺席时 targets 为空，app.js 据此隐藏「译文语言」下拉。
+  // 探测结果缓存，config 时同步读。
+  //
+  // 为什么要留一次重探：本模块在文档开始时求值，如果这一刻 Capacitor 的原生
+  // 插件表还没注入完，`window.Capacitor.Plugins.SherpaMT` 是 undefined，
+  // 探测会得到空表**而且永久缓存**——下拉就再也不出现。所以空表时允许重探
+  // 一次（本地调用，通常 <10 ms），非空则不再重复问。
   let mtTargets = [];
-  const mtProbe = mt
-    .probe()
-    .then((res) => {
-      mtTargets = res.targets || [];
-      return mtTargets;
-    })
-    .catch(() => []);
+  let mtProbe = null;
+
+  function ensureMtProbe() {
+    if (mtProbe && mtTargets.length > 0) return mtProbe;
+    mtProbe = mt
+      .probe()
+      .then((res) => {
+        mtTargets = res.targets || [];
+        return mtTargets;
+      })
+      .catch(() => mtTargets);
+    return mtProbe;
+  }
 
   const engine = new MobileEngine({
     onPartial: (p) => emit({ type: 'partial', ...p }),
@@ -227,7 +238,7 @@ function install() {
     if (path === '/api/config') {
       // 等一次翻译引擎探测（最多 1.5 s）：app.js 只在启动时读一次 config，
       // 错过这次，下拉就永远不出现。探测本身是本地调用，通常 <10 ms。
-      await Promise.race([mtProbe, new Promise((resolve) => setTimeout(resolve, 1500))]);
+      await Promise.race([ensureMtProbe(), new Promise((resolve) => setTimeout(resolve, 1500))]);
       return json({
         version: '1.0.0-mobile',
         stage: 'release',

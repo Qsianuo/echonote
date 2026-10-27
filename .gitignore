@@ -71,7 +71,10 @@ mobile/android/keystore.properties
 mobile/node_modules/
 mobile/test/out/
 mobile/test/fixtures.json
+# 原生二进制一律不入库：sherpa 的三个 .so 与翻译用的 ORT 都是预编译产物，
+# 体积 120 MB+，且需要改 soname 才能共存——用 tools/pin_ort_jni.py 现场生成。
 mobile/android/app/src/main/jniLibs/
+mobile/android/app/libs/
 mobile/android/app/src/main/assets/public/
 mobile/android/app/src/main/assets/capacitor.config.json
 mobile/android/capacitor-cordova-android-plugins/
@@ -92,3 +95,11 @@ cloud-deploy/
 
 # 敏感：签名口令文档绝不入库
 docs/签名口令与待办-*.md
+
+# 宣传片成片（12 MB 视频/动图不入库，只提交制作说明）
+docs/promo/*.mp4
+docs/promo/*.gif
+docs/promo/*.png
+
+# 本机日志归档
+logs-archive/

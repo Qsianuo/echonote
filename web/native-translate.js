@@ -7,9 +7,10 @@
  * 插件缺席时静默降级，界面上「译文语言」下拉会自己消失（app.js 只在
  * translate_targets 非空时才显示它）。
  *
- * 降级是常态而非异常：本轮 Android 侧只接了识别与术语纠错，翻译引擎还
- * 没有原生实现，因此 probe() 返回空表——但通道（config 帧的 translate_to、
- * final/refine 的 translation 字段、导出）已经打通，引擎一落地即可见。
+ * 降级仍是常态而非异常：模型（每方向约 226 MB）不随 APK 发布，用户没下载就
+ * 探测不到，probe() 返回空表——界面上下拉不出现，而不是给一个点了没反应的
+ * 选项。译文通道（config 帧的 translate_to、final/refine 的 translation 字段、
+ * 导出）与桌面端完全一致。
  */
 
 const PLUGIN = 'SherpaMT';

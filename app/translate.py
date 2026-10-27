@@ -18,15 +18,15 @@ import logging
 import threading
 from pathlib import Path
 
-from . import config
+from . import config, models
 
 log = logging.getLogger("echonote.translate")
 
-# 目前只转换了中英双向。要加语言：这里加一行，再把模型放进对应目录。
-_PAIRS: dict[tuple[str, str], str] = {
-    ("zh", "en"): "mt-zh-en",
-    ("en", "zh"): "mt-en-zh",
-}
+# 方向 -> 模型 spec。目录名、仓库与文件清单只在 models.MT_CATALOG 里写一份：
+# 下载器（fetch）和翻译器（这里）引用同一个对象，才不会出现「下到 A 目录、
+# 去 B 目录找」这种只能靠用户手动摆放才对得上的错位。
+# 要加语言：在 models.MT_CATALOG 加一条，这里跟着加一行。
+_PAIRS: dict[tuple[str, str], models.ModelSpec] = dict(models.MT_PAIRS)
 
 # 界面「译文语言」可选的代码，必须与 _PAIRS 的目标语言一致。
 TARGETS: tuple[str, ...] = ("zh", "en")
@@ -39,19 +39,21 @@ _decode_lock = threading.Lock()
 
 def model_dir(source: str, target: str) -> Path | None:
     """Direction's model directory, or None when the pair has no model."""
-    name = _PAIRS.get((source, target))
-    return None if name is None else Path(config.MODEL_DIR) / name
+    spec = _PAIRS.get((source, target))
+    return None if spec is None else Path(config.MODEL_DIR) / spec.dirname
 
 
 def is_installed(source: str, target: str) -> bool:
-    """True when every file the translator needs is on disk."""
-    directory = model_dir(source, target)
-    if directory is None:
+    """True when every file the translator needs is on disk.
+
+    判据跟着 spec 走（含 ``source.spm`` / ``target.spm``）：只查权重会放过
+    「下载到一半」的目录，那种情况一调用就崩，比明确缺失更难查。
+    """
+    spec = _PAIRS.get((source, target))
+    if spec is None:
         return False
-    return all(
-        (directory / name).is_file()
-        for name in ("model.bin", "source.spm", "target.spm")
-    )
+    directory = Path(config.MODEL_DIR) / spec.dirname
+    return all((directory / name).is_file() for name in spec.required_files)
 
 
 def available() -> bool:

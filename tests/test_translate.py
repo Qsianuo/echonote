@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from app import config, protocol, translate
+from app import config, models, protocol, translate
 
 # conftest 把 ECHONOTE_MODEL_DIR 指到一个不存在的目录，保证 CI 不依赖权重。
 # 真实翻译用例因此必须自己把目录指回仓库的 models/，并按文件是否存在决定跑不跑。
@@ -122,3 +122,95 @@ class TestRealTranslation:
             run = run + 1 if cur == prev else 1
             assert run < 3, f"疑似重复循环：{out}"
         assert len(words) <= len(text) * 2, f"译文异常冗长：{out}"
+
+
+class TestFetchCatalog:
+    """下载路径的守护。
+
+    守的是「用户跑一次 fetch-model 到底能不能拿到翻译模型」。坏掉的方式很
+    隐蔽：文件下载「成功」但缺 ``source.spm``——文件在、界面控件也在，一点
+    就崩。所以清单校验必须跟着 spec 走，不能一律按 whisper 的两个文件判断。
+    """
+
+    def test_translation_specs_require_tokenizer(self) -> None:
+        assert models.MT_CATALOG, "翻译档不能为空，否则 fetch 无从下载"
+        for spec in models.MT_CATALOG:
+            assert "model.bin" in spec.required_files
+            assert "source.spm" in spec.required_files, f"{spec.key} 缺分词器清单"
+            assert "target.spm" in spec.required_files, f"{spec.key} 缺分词器清单"
+
+    def test_whisper_specs_keep_their_own_file_list(self) -> None:
+        # 给 ModelSpec 加 required 字段后，whisper 档不能跟着被改成翻译的清单。
+        for spec in models.CATALOG:
+            assert spec.required_files == models.REQUIRED_FILES
+
+    def test_spec_by_key_covers_both_catalogs(self) -> None:
+        assert models.spec_by_key("medium") is models.BY_KEY["medium"]
+        assert models.spec_by_key("mt-zh-en") is models.MT_BY_KEY["mt-zh-en"]
+        assert models.spec_by_key("mt-en-zh") is models.MT_BY_KEY["mt-en-zh"]
+        assert models.spec_by_key("not-a-model") is None
+
+    def test_directory_without_tokenizer_is_rejected(self, tmp_path: Path) -> None:
+        # 只有权重 + config 的目录（正是 allow_patterns 漏掉 "*.spm" 时留下的
+        # 状态）必须判为不完整，否则下载器会报「完成」，翻译却在运行时崩。
+        spec = models.MT_BY_KEY["mt-zh-en"]
+        directory = tmp_path / spec.dirname
+        directory.mkdir()
+        (directory / "model.bin").write_bytes(b"0" * (2 << 20))
+        (directory / "config.json").write_text("{}", encoding="utf-8")
+        assert not models.is_spec_complete(spec, tmp_path)
+
+        (directory / "source.spm").write_text("x", encoding="utf-8")
+        (directory / "target.spm").write_text("x", encoding="utf-8")
+        assert models.is_spec_complete(spec, tmp_path)
+
+    def test_pairs_match_ui_targets(self) -> None:
+        assert set(models.MT_PAIRS) == {("zh", "en"), ("en", "zh")}
+        # 下拉里能选的语言，必须都能翻——否则用户选了却什么都不出。
+        assert set(translate.TARGETS) == {target for _, target in models.MT_PAIRS}
+
+
+class TestFetchCatalog:
+    """下载路径的守护。
+
+    守的是「用户跑一次 fetch-model 到底能不能拿到翻译模型」。坏掉的方式很
+    隐蔽：文件下载「成功」但缺 ``source.spm``——文件在、界面控件也在，一点
+    就崩。所以清单校验必须跟着 spec 走，不能一律按 whisper 的两个文件判断。
+    """
+
+    def test_translation_specs_require_tokenizer(self) -> None:
+        assert models.MT_CATALOG, "翻译档不能为空，否则 fetch 无从下载"
+        for spec in models.MT_CATALOG:
+            assert "model.bin" in spec.required_files
+            assert "source.spm" in spec.required_files, f"{spec.key} 缺分词器清单"
+            assert "target.spm" in spec.required_files, f"{spec.key} 缺分词器清单"
+
+    def test_whisper_specs_keep_their_own_file_list(self) -> None:
+        # 给 ModelSpec 加 required 字段后，whisper 档不能跟着被改成翻译的清单。
+        for spec in models.CATALOG:
+            assert spec.required_files == models.REQUIRED_FILES
+
+    def test_spec_by_key_covers_both_catalogs(self) -> None:
+        assert models.spec_by_key("medium") is models.BY_KEY["medium"]
+        assert models.spec_by_key("mt-zh-en") is models.MT_BY_KEY["mt-zh-en"]
+        assert models.spec_by_key("mt-en-zh") is models.MT_BY_KEY["mt-en-zh"]
+        assert models.spec_by_key("not-a-model") is None
+
+    def test_directory_without_tokenizer_is_rejected(self, tmp_path: Path) -> None:
+        # 只有权重 + config 的目录（正是 allow_patterns 漏掉 "*.spm" 时留下的
+        # 状态）必须判为不完整，否则下载器会报「完成」，翻译却在运行时崩。
+        spec = models.MT_BY_KEY["mt-zh-en"]
+        directory = tmp_path / spec.dirname
+        directory.mkdir()
+        (directory / "model.bin").write_bytes(b"0" * (2 << 20))
+        (directory / "config.json").write_text("{}", encoding="utf-8")
+        assert not models.is_spec_complete(spec, tmp_path)
+
+        (directory / "source.spm").write_text("x", encoding="utf-8")
+        (directory / "target.spm").write_text("x", encoding="utf-8")
+        assert models.is_spec_complete(spec, tmp_path)
+
+    def test_pairs_match_ui_targets(self) -> None:
+        assert set(models.MT_PAIRS) == {("zh", "en"), ("en", "zh")}
+        # 下拉里能选的语言，必须都能翻——否则用户选了却什么都不出。
+        assert set(translate.TARGETS) == {target for _, target in models.MT_PAIRS}

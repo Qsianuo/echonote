@@ -114,7 +114,7 @@ def download(
 ) -> bool:
     """Fetch ``spec`` into ``model_dir``. Idempotent unless ``force``."""
     target = models.local_dir(model_dir, spec)
-    if models.is_complete(target) and not force:
+    if models.is_spec_complete(spec, model_dir) and not force:
         log(f"  already present: {target} ({human(folder_size(target) / 2**20)})")
         return True
 
@@ -135,7 +135,9 @@ def download(
         snapshot_download(
             repo_id=spec.repo,
             local_dir=str(target),
-            allow_patterns=["*.bin", "*.json", "*.txt"],
+            # "*.spm" 是翻译模型的 SentencePiece 分词器。早先没有这一条，
+            # 下载会「成功」但译文一调用就崩——权重在，分词器不在。
+            allow_patterns=["*.bin", "*.json", "*.txt", "*.spm"],
             max_workers=2,
         )
     except Exception as exc:  # noqa: BLE001 - shown to the user verbatim
@@ -144,9 +146,9 @@ def download(
         log(f"       {target}")
         return False
 
-    if not models.is_complete(target):
+    if not models.is_spec_complete(spec, model_dir):
         log("  ERROR: download finished but the folder is incomplete")
-        for name in models.REQUIRED_FILES:
+        for name in spec.required_files:
             ok = (target / name).is_file()
             log(f"         {name}: {'ok' if ok else 'MISSING'}")
         return False

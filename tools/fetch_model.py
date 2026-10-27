@@ -30,9 +30,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--model",
         default=None,
-        help="catalog key, or 'sensevoice' for the offline SenseVoice backend "
-        "(default: the pair the app runs on — a fast live "
-        "model plus the default final model)",
+        help="catalog key (whisper key, 'sensevoice', or 'mt-zh-en'/'mt-en-zh' "
+        "for offline translation); default: everything the app needs to run "
+        "offline — a fast live model, the default final model, and both "
+        "translation directions",
     )
     parser.add_argument("--all", action="store_true", help="fetch every catalog entry")
     parser.add_argument(
@@ -64,8 +65,15 @@ def main(argv: list[str] | None = None) -> int:
             f"{'present' if sensevoice_present else '-':<8} "
             "SenseVoice 定稿档（ECHONOTE_ASR_BACKEND=sensevoice 时使用）"
         )
+        for spec in models.MT_CATALOG:
+            present = models.is_spec_complete(spec, model_dir)
+            print(
+                f" * {spec.key:<14} {spec.label:<6} {fetch.human(spec.size_mb):>8}  "
+                f"{'present' if present else '-':<8} {spec.note}"
+            )
         print(
-            "\n* = part of the default pair (live caption model + final model)."
+            "\n* = downloaded by default (live caption model + final model"
+            " + both translation directions)."
             " Pass --model <key> to fetch one specific model."
         )
         return 0
@@ -83,15 +91,19 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if ok else 1
 
     if args.all:
-        specs = list(models.CATALOG)
+        specs = [*models.CATALOG, *models.MT_CATALOG]
     elif args.model is None:
         # v0.11 runs two models: a small one for the live caption and the
         # default one for the accurate pass. Fetching only the default would
         # silently degrade live captions to the accurate model's speed, which
         # is the exact complaint this release fixes.
+        #
+        # 翻译模型也放进默认集：它是「定稿之后」才用得上的一层，用户不会
+        # 主动去找它的下载命令；不下就等于界面上没有这个功能。
         specs = [models.BY_KEY[key] for key in models.default_pair()]
-    elif args.model in models.BY_KEY:
-        specs = [models.BY_KEY[args.model]]
+        specs += list(models.MT_CATALOG)
+    elif models.spec_by_key(args.model) is not None:
+        specs = [models.spec_by_key(args.model)]
     else:
         print(f"unknown model {args.model!r}; try --list")
         return 2

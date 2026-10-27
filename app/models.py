@@ -39,10 +39,17 @@ class ModelSpec:
     size_mb: int
     tier: str
     note: str
+    # 必须落盘的文件。留空表示按 whisper 的约定（``REQUIRED_FILES``）；
+    # 翻译模型要额外的 SentencePiece 分词器，所以自己列一份。
+    required: tuple[str, ...] = ()
 
     @property
     def display(self) -> str:
         return f"{self.label}（{self.key}）"
+
+    @property
+    def required_files(self) -> tuple[str, ...]:
+        return self.required or REQUIRED_FILES
 
 
 # Ordered best-quality first: ``resolve()`` walks this order to pick whatever
@@ -143,6 +150,78 @@ BY_KEY: dict[str, ModelSpec] = {spec.key: spec for spec in CATALOG}
 SENSEVOICE_DIRNAME = "sherpa-sense-voice-small"
 SENSEVOICE_REPO = "csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17"
 SENSEVOICE_FILES = ("model.int8.onnx", "tokens.txt")
+
+
+# --------------------------------------------------------------------------
+# Offline translation (Opus-MT 77M, ctranslate2 int8)
+# --------------------------------------------------------------------------
+#
+# 和 SenseVoice 一样不进 whisper CATALOG：它不是语音模型，而是「定稿之后」
+# 的一层，界面上也不会出现在「模型」下拉里。但目录名、仓库与文件清单必须
+# 只写一份——``translate`` 拿它找模型，``fetch`` 拿它下载，两处引用同一份
+# 才不会出现「能下载但读不到」的错位。
+#
+# 每个方向约 80 MB（int8）。实测定稿后单句 50~100 ms。
+MT_REQUIRED_FILES = ("model.bin", "config.json", "source.spm", "target.spm")
+
+MT_CATALOG: tuple[ModelSpec, ...] = (
+    ModelSpec(
+        key="mt-zh-en",
+        repo="jiangzhuo9357/opus-mt-zh-en-ct2",
+        dirname="mt-zh-en",
+        label="中译英",
+        size_mb=80,
+        tier="translate",
+        note="离线翻译：中文原文 → 英文译文，约 80 MB",
+        required=MT_REQUIRED_FILES,
+    ),
+    ModelSpec(
+        key="mt-en-zh",
+        repo="jiangzhuo9357/opus-mt-en-zh-ct2",
+        dirname="mt-en-zh",
+        label="英译中",
+        size_mb=80,
+        tier="translate",
+        note="离线翻译：英文原文 → 中文译文，约 80 MB",
+        required=MT_REQUIRED_FILES,
+    ),
+)
+
+MT_BY_KEY: dict[str, ModelSpec] = {spec.key: spec for spec in MT_CATALOG}
+
+# (原文语言, 译文语言) -> spec。界面的「译文语言」下拉按此顺序呈现，
+# 所以这里是产品顺序，不是字典序。
+MT_PAIRS: dict[tuple[str, str], ModelSpec] = {
+    ("zh", "en"): MT_BY_KEY["mt-zh-en"],
+    ("en", "zh"): MT_BY_KEY["mt-en-zh"],
+}
+
+
+def spec_by_key(key: str) -> ModelSpec | None:
+    """按 key 找 spec，语音与翻译两条目录都查。
+
+    ``--fetch-model`` 是用户唯一会手打 key 的地方，查找逻辑收在这里，
+    免得 CLI 与 exe 各写一遍、又各自漏掉翻译档。
+    """
+    return BY_KEY.get(key) or MT_BY_KEY.get(key)
+
+
+def is_spec_complete(spec: ModelSpec, model_dir: Path | str) -> bool:
+    """按 spec 自己的文件清单判断模型是否齐备。
+
+    ``is_complete`` 只认 whisper 的两个文件；翻译模型少了 ``source.spm``
+    会「下载成功但一调用就崩」，所以校验必须跟着 spec 走。
+    """
+    root = Path(model_dir) / spec.dirname
+    if not root.is_dir():
+        return False
+    for name in spec.required_files:
+        if not (root / name).is_file():
+            return False
+    try:
+        return (root / "model.bin").stat().st_size >= _MIN_WEIGHT_BYTES
+    except OSError:
+        return False
 
 
 def default_pair() -> tuple[str, ...]:

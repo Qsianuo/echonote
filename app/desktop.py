@@ -392,7 +392,11 @@ def _fetch_model(argv: list[str]) -> int:
     """
     from . import fetch, models
 
-    keys = list(models.default_pair())
+    # 默认集 = 实时字幕模型 + 定稿模型 + 离线翻译双向。
+    # 翻译不放进默认集的话，用户得先读文档才知道要传 ``--model mt-zh-en``，
+    # 而界面上「译文语言」会因为他没下模型而静默隐藏——「看起来有这个功能、
+    # 实际点不到」比明确没有更坑。多 160 MB，相对语音模型只是零头。
+    keys = list(models.default_pair()) + list(models.MT_BY_KEY)
     for item in argv[argv.index("--fetch-model") + 1 :]:
         if not item.startswith("-"):
             keys = [item.strip()]
@@ -400,9 +404,10 @@ def _fetch_model(argv: list[str]) -> int:
 
     specs = []
     for key in keys:
-        spec = models.BY_KEY.get(key)
+        spec = models.spec_by_key(key)
         if spec is None:
-            _fatal(f"未知模型 {key!r}。可用：{', '.join(models.BY_KEY)}")
+            known = ", ".join([*models.BY_KEY, *models.MT_BY_KEY])
+            _fatal(f"未知模型 {key!r}。可用：{known}")
             return 2
         specs.append(spec)
 

@@ -705,8 +705,10 @@ MAX_FRAME_BYTES = 32 * 1024
 AUDIO_QUEUE_MAX_SECONDS = 60.0
 AUDIO_QUEUE_MAX_FRAMES = int(AUDIO_QUEUE_MAX_SECONDS * 1000 / MIN_FRAME_MS)  # 600
 
-MAX_CONCURRENT_SESSIONS = 2
-BUSY_RETRY_AFTER_S = 10
+# 并发会话上限。"打开页面就占一个名额"（WS 一建立即占槽），本地单人工具 2 个
+# 够用；云端体验页多人同时在线时 2 个会瞬间打满，后来者一律收到 busy。
+MAX_CONCURRENT_SESSIONS = max(1, _env_int("ECHONOTE_MAX_SESSIONS", 2))
+BUSY_RETRY_AFTER_S = _env_int("ECHONOTE_BUSY_RETRY_AFTER_S", 10)
 
 # How long a closed connection may keep the worker draining its tail.
 SESSION_TAIL_TIMEOUT_S = 30.0

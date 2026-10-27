@@ -83,8 +83,12 @@ mobile/ios/App/App/public/
 # 演示音源：原生壳 ?demo 模式与一致性测试用的真实人声样本（例外于 *.wav）
 !web/sample.wav
 
-# 本地部署目录（EchoNote桌面版/：含 exe 与模型的运行副本，不入库）
+# 本地部署目录（含 exe 与模型的运行副本，不入库）。改名后旧规则失效过，两个都留着。
 EchoNote桌面版/
+EchoNote-desktop/
+
+# 云部署包：含访问令牌（start.sh / .access-token）与云端下载的模型，绝不入库。
+cloud-deploy/
 
 # 敏感：签名口令文档绝不入库
 docs/签名口令与待办-*.md

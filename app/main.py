@@ -19,7 +19,7 @@ from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
 import numpy as np
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -135,6 +135,40 @@ def health() -> dict:
 def ready() -> dict:
     """Readiness: the only probe the frontend may gate on."""
     return stt.status()
+
+
+@app.get("/api/cloud-diag")
+def cloud_diag() -> dict:
+    """Cloud-deploy diagnostics, opt-in via ECHONOTE_CLOUD_DIAG=1.
+
+    Reports the model directory layout and the tail of the cloud fetch log so
+    a headless sandbox can be debugged from the outside. Disabled by default:
+    on a personal machine it would leak directory listings (PRD FR-020).
+    """
+    import os as _os
+    from pathlib import Path
+
+    if not _os.getenv("ECHONOTE_CLOUD_DIAG"):
+        raise HTTPException(status_code=404, detail="not found")
+
+    model_dir = Path(config.MODEL_DIR)
+    layout: dict[str, list[str]] = {}
+    if model_dir.is_dir():
+        for child in sorted(model_dir.iterdir()):
+            if child.is_dir():
+                layout[child.name] = sorted(p.name for p in child.iterdir())
+            else:
+                layout.setdefault("(files)", []).append(child.name)
+
+    log_tail: list[str] = []
+    for log_path in (Path("/tmp/echonote-fetch.log"), Path("/workspace/app.log")):
+        try:
+            log_tail.append(f"===== {log_path} =====")
+            log_tail.extend(log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-60:])
+        except OSError:
+            log_tail.append("(not found)")
+
+    return {"model_dir": str(model_dir), "layout": layout, "fetch_log": log_tail}
 
 
 @app.get("/api/status")

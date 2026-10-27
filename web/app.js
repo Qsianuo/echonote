@@ -7,7 +7,7 @@
   const PROTOCOL_VERSION = '4';
   // 静态资源版本号：与 index.html 里 style.css / app.js 的 ?v= 保持一致。
   // 改动前端文件时同步递增，浏览器才会重新拉取（worklet 模块同样受缓存）。
-  const ASSET_VERSION = "50ed3601f1";
+  const ASSET_VERSION = "e34021438a";
   const RECONNECT_BASE_MS = 1500;
   const RECONNECT_MAX_MS = 15000;
   const RECONNECT_ATTEMPTS_CAP = 4;
@@ -1553,16 +1553,31 @@
   }
   setInterval(renderLiveStatus, 1000);
 
+  /**
+   * 译文的术语修复（见 `web/mt-repair.js`）。
+   *
+   * 只在「译成中文」时生效：77M 的 opus-mt 会把 `ring light` 翻成「戒指灯」，
+   * 桌面 ctranslate2 与安卓 ONNX 两套推理栈错得一模一样，属于模型能力上限，
+   * 不是解码策略问题（`tools/mt_term_eval.py` 可复现）。所以在这一层按
+   * 「原文含术语 + 译文含已知错串」定向替换，两端的译文都能吃到。
+   */
+  function repairTranslation(source, translation) {
+    if (!translation || state.translateTo !== 'zh') return translation;
+    const fix = typeof window !== 'undefined' ? window.EchoMTRepair : null;
+    return fix ? fix.repair(source, translation) : translation;
+  }
+
   function onFinal(message) {
     if (!message.id || state.finalIds.has(message.id)) return; // FR-010 AC5
     state.finalIds.add(message.id);
 
     const originSeconds = state.sessionOriginMs / 1000;
+    const rawTranslation = message.translation ? String(message.translation).trim() : '';
     const item = {
       id: message.id,
       text: message.text,
       // 译文明文随同一条消息下来；空 = 这段没翻（未开启 / 同语种 / 模型缺失）。
-      translation: message.translation ? String(message.translation).trim() : '',
+      translation: repairTranslation(message.text, rawTranslation),
       start: originSeconds + Number(message.start || 0),
       end: originSeconds + Number(message.end || 0),
       epoch: message.epoch,
@@ -1607,8 +1622,8 @@
     }
     const nextTranslation = String(message.translation || '').trim();
     if (nextTranslation) {
-      item.translation = nextTranslation;
-      setRowTranslation(row, nextTranslation);
+      item.translation = repairTranslation(item.text, nextTranslation);
+      setRowTranslation(row, item.translation);
     }
     item.stable = true;
 

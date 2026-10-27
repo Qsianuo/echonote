@@ -19,9 +19,9 @@
  * app.js 的 boot() 因此挂到 DOMContentLoaded，保证注册先于启动安装。
  */
 
-import { MobileEngine } from './native-engine.js?v=e34021438a';
-import { MODES } from './native-vad.js?v=e34021438a';
-import { sherpa } from './native-sherpa.js?v=e34021438a';
+import { MobileEngine } from './native-engine.js?v=6a5c42e547';
+import { MODES } from './native-vad.js?v=6a5c42e547';
+import { sherpa } from './native-sherpa.js?v=6a5c42e547';
 import { mt } from './native-translate.js';
 
 const isNative = typeof window !== 'undefined' && !!window.Capacitor;
@@ -66,6 +66,40 @@ function install() {
     onWarning: (w) => emit({ type: 'warning', retryable: true, ...w }),
   });
   engine.setMode(localStorage.getItem('echonote-mode') || 'personal');
+
+  // ---------------------------------------------------------- 版本号
+  //
+  // 原生壳里没有服务端的 /api/config，早先这里把版本写死成 '1.0.0-mobile'，
+  // 于是每发一版，开场画面和页脚都还挂着旧号（v1.0.3 的包上写着 v1.0.0）。
+  // 版本号的唯一真源是 APK 清单，因此向原生要，取不到就留空——
+  // 宁可空着，也不再显示一个错的号。
+  let appVersion = '';
+  let appVersionPending = null;
+
+  function ensureAppVersion() {
+    if (!appVersionPending) {
+      appVersionPending = (async () => {
+        try {
+          const plugin = window.Capacitor?.Plugins?.SherpaASR;
+          const info = plugin && plugin.appInfo ? await plugin.appInfo() : null;
+          appVersion = info && info.version ? String(info.version) : '';
+        } catch (error) {
+          appVersion = '';
+        }
+        if (appVersion) {
+          const splash = document.getElementById('splash-version');
+          if (splash) splash.textContent = `v${appVersion}`;
+          const tag = document.getElementById('version-tag');
+          if (tag) tag.textContent = `v${appVersion}`;
+        }
+        return appVersion;
+      })();
+    }
+    return appVersionPending;
+  }
+
+  // 开场动画一出现就要有号，不等 config 那一次请求。
+  ensureAppVersion();
 
   // ------------------------------------------------------ 模型引导
   async function loadModels() {
@@ -239,8 +273,10 @@ function install() {
       // 等一次翻译引擎探测（最多 1.5 s）：app.js 只在启动时读一次 config，
       // 错过这次，下拉就永远不出现。探测本身是本地调用，通常 <10 ms。
       await Promise.race([ensureMtProbe(), new Promise((resolve) => setTimeout(resolve, 1500))]);
+      // 版本号同理要等：app.js 拿到 config 后就不再问了。
+      await Promise.race([ensureAppVersion(), new Promise((resolve) => setTimeout(resolve, 800))]);
       return json({
-        version: '1.0.0-mobile',
+        version: appVersion,
         stage: 'release',
         protocol: '4',
         asr_backend: 'native',

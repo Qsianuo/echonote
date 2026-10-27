@@ -76,6 +76,35 @@ class SherpaASRPlugin : Plugin() {
         requestPermissionForAlias("microphone", call, "micResult")
     }
 
+    /**
+     * 报出这个 APK 自己的版本号（`versionName` / `versionCode`）。
+     *
+     * 网页层要在开场画面和页脚显示版本，而原生壳里没有 /api/config 的服务端，
+     * 早先只能写死一个 `'1.0.0-mobile'`——于是每发一次版，开场画面还挂着旧号
+     * 被用户一眼看出来。版本号的真源只有一个：构建时写进 APK 的清单，所以从
+     * PackageManager 读回来，不新增依赖（不为此装 @capacitor/app）。
+     */
+    @PluginMethod
+    fun appInfo(call: PluginCall) {
+        val ret = JSObject()
+        try {
+            val info = context.packageManager.getPackageInfo(context.packageName, 0)
+            ret.put("version", info.versionName ?: "")
+            // versionCode 在 API 28+ 走 longVersionCode，老版本用 versionCode。
+            val code = if (android.os.Build.VERSION.SDK_INT >= 28) {
+                info.longVersionCode.toInt()
+            } else {
+                @Suppress("DEPRECATION")
+                info.versionCode
+            }
+            ret.put("build", code)
+        } catch (e: Exception) {
+            ret.put("version", "")
+            ret.put("build", 0)
+        }
+        call.resolve(ret)
+    }
+
     @PermissionCallback
     fun micResult(call: PluginCall) {
         val ret = JSObject()

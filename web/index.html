@@ -21,7 +21,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="apple-touch-icon" href="icon-512.png" />
-    <link rel="stylesheet" href="style.css?v=e34021438a" />
+    <link rel="stylesheet" href="style.css?v=6a5c42e547" />
   </head>
   <body>
     <div class="bg-grid" aria-hidden="true"></div>
@@ -40,7 +40,9 @@
         </div>
         <div class="splash-title">EchoNote <span>声记</span></div>
         <div class="splash-tag">录音与识别，都在你的设备上</div>
-        <div class="splash-version">v1.0.0</div>
+        <!-- 版本号由运行时填：桌面端取 /api/config 的 version，原生壳取 APK 的
+             versionName。写死在这里必然过期（v1.0.3 的包上还挂着 v1.0.0）。 -->
+        <div class="splash-version" id="splash-version"></div>
       </div>
     </div>
 
@@ -284,9 +286,9 @@
          检测到 Capacitor 才拦截 fetch/WebSocket；桌面环境加载等于空操作。
          必须在 app.js 的 boot() 之前生效——所以 boot 挂在
          DOMContentLoaded 上。 -->
-    <script src="transport.js?v=e34021438a"></script>
-    <script type="module" src="native-boot.js?v=e34021438a"></script>
-    <script src="mt-repair.js?v=e34021438a"></script>
-    <script src="app.js?v=e34021438a"></script>
+    <script src="transport.js?v=6a5c42e547"></script>
+    <script type="module" src="native-boot.js?v=6a5c42e547"></script>
+    <script src="mt-repair.js?v=6a5c42e547"></script>
+    <script src="app.js?v=6a5c42e547"></script>
   </body>
 </html>

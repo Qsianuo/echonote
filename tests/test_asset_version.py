@@ -73,3 +73,27 @@ def test_native_modules_are_imported_through_exactly_one_url():
     assert seen, "no versioned native imports found — the guard would be vacuous"
     duplicated = {module: keys for module, keys in seen.items() if len(keys) > 1}
     assert not duplicated, f"modules imported under more than one key: {duplicated}"
+
+
+def test_splash_version_is_rendered_at_runtime_not_hardcoded():
+    """开场画面的版本号必须来自运行时，不能是 HTML 里的死字符串。
+
+    v1.0.3 的安装包上，开场动画还写着 ``v1.0.0``——因为它是 ``index.html`` 里
+    手写的一个 div。用户一眼就看出来了。版本号的唯一真源是包本身
+    （桌面端 ``/api/config.version``，原生壳 APK 的 ``versionName``），
+    所以这里锁两件事：元素带 id、内容为空；两端都有代码去填它。
+    """
+    html = (WEB / "index.html").read_text(encoding="utf-8")
+    match = re.search(r'<div class="splash-version"([^>]*)>(.*?)</div>', html, re.S)
+    assert match, "开场画面的版本元素不见了"
+    attrs, content = match.group(1), match.group(2)
+    assert 'id="splash-version"' in attrs, "版本元素必须带 id，运行时才填得进去"
+    assert not re.search(r"\d+\.\d+", content), f"版本号不许写死在 HTML 里：{content!r}"
+
+    app = (WEB / "app.js").read_text(encoding="utf-8")
+    assert "splash-version" in app, "桌面端没有把 config.version 填进开场画面"
+    boot = (WEB / "native-boot.js").read_text(encoding="utf-8")
+    assert "splash-version" in boot, "原生壳没有把 APK versionName 填进开场画面"
+    # 注释里提到旧串可以，作为取值不行。
+    assert not re.search(r"version://s*['\"]1\.0\.0-mobile['\"]", boot), "原生壳又在伪造版本号了"
+

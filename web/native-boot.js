@@ -19,9 +19,10 @@
  * app.js 的 boot() 因此挂到 DOMContentLoaded，保证注册先于启动安装。
  */
 
-import { MobileEngine } from './native-engine.js?v=f9b3a1a1e2';
-import { MODES } from './native-vad.js?v=f9b3a1a1e2';
-import { sherpa } from './native-sherpa.js?v=f9b3a1a1e2';
+import { MobileEngine } from './native-engine.js?v=f51f3592fa';
+import { MODES } from './native-vad.js?v=f51f3592fa';
+import { sherpa } from './native-sherpa.js?v=f51f3592fa';
+import { mt } from './native-translate.js';
 
 const isNative = typeof window !== 'undefined' && !!window.Capacitor;
 if (isNative) install();
@@ -35,6 +36,17 @@ function install() {
   let activeSession = null;
   let doneTimer = null;
   let lastStatusPush = 0;
+
+  // 翻译引擎探测：插件缺席（本轮 Android 未实现原生翻译）时 targets 为空，
+  // app.js 据此隐藏「译文语言」下拉。探测结果缓存，config 时同步读。
+  let mtTargets = [];
+  const mtProbe = mt
+    .probe()
+    .then((res) => {
+      mtTargets = res.targets || [];
+      return mtTargets;
+    })
+    .catch(() => []);
 
   const engine = new MobileEngine({
     onPartial: (p) => emit({ type: 'partial', ...p }),
@@ -157,6 +169,8 @@ function install() {
       // app.js 的 beginSession() 每次开录/续录都会带新 epoch——正是引擎
       // 重建切句器（读最新情境预设）的时机。
       if (Number(msg.epoch) > engine.epoch) engine.beginSession();
+      // 译文语向随 config 帧下来（'' = 不翻）。引擎自己记着，切档时作废旧译文。
+      engine.setTranslateTo(msg.translate_to || '');
     } else if (msg.type === 'flush') {
       engine.flushUtterance();
       armDoneTimer();
@@ -211,6 +225,9 @@ function install() {
     }
 
     if (path === '/api/config') {
+      // 等一次翻译引擎探测（最多 1.5 s）：app.js 只在启动时读一次 config，
+      // 错过这次，下拉就永远不出现。探测本身是本地调用，通常 <10 ms。
+      await Promise.race([mtProbe, new Promise((resolve) => setTimeout(resolve, 1500))]);
       return json({
         version: '1.0.0-mobile',
         stage: 'release',
@@ -236,6 +253,8 @@ function install() {
         max_frame_bytes: 32768,
         mode: engine.mode,
         hotwords: '',
+        // 空数组 = 本机没有翻译引擎，前端的「译文语言」下拉不出现。
+        translate_targets: mtTargets,
       });
     }
     if (path === '/api/ready' || path === '/api/status') return json(statusPayload());

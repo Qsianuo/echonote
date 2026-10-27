@@ -12,8 +12,10 @@
  *  · 定稿永远用 SenseVoice（离线、带标点）；流式文本只做字幕与兜底。
  */
 
-import { Segmenter, MODES } from './native-vad.js?v=f9b3a1a1e2';
-import { sherpa } from './native-sherpa.js?v=f9b3a1a1e2';
+import { correct as fixTerms } from './glossary.js';
+import { Segmenter, MODES } from './native-vad.js?v=f51f3592fa';
+import { sherpa } from './native-sherpa.js?v=f51f3592fa';
+import { mt } from './native-translate.js';
 
 const LIVE_STEP_S = 0.6;
 const MIN_FIRST_DECODE_S = 2.0;
@@ -24,7 +26,18 @@ export class MobileEngine {
     this.segmenter = null;
     this.mode = 'personal';
     this.epoch = 0;
+    // 译文语向：'' = 不翻译。切换时递增 seq，迟到的旧译文不会贴到新档位上。
+    this.translateTo = '';
+    this.translateSeq = 0;
     this.reset();
+  }
+
+  /** 设置译文语向（来自 config 帧的 translate_to）。 */
+  setTranslateTo(target) {
+    const next = String(target || '');
+    if (next === this.translateTo) return;
+    this.translateTo = next;
+    this.translateSeq += 1;
   }
 
   reset() {
@@ -139,11 +152,31 @@ export class MobileEngine {
     text = (text || '').trim();
     if (!text) return;
 
+    // 术语纠错只作用于定稿，格式与桌面端一致（app/main.py 的 _decode_final）：
+    // 实时字幕边出边长，在半句上按读音纠错会把还在变的词判错。桌面的术语表
+    // 可由用户编辑，移动端随包固化——改术语表要重跑 tools/gen_glossary_data.py。
+    text = fixTerms(text);
+
     this.finalSeq += 1;
     this.lastFinalText = text;
     const payload = { id: `${this.epoch}-${this.finalSeq}`, epoch: this.epoch, text, start, end };
     this.handlers.onFinal && this.handlers.onFinal({ ...payload, type: 'final', stable: false });
     this.handlers.onRefine && this.handlers.onRefine({ ...payload, type: 'refine' });
+
+    // 译文后补，不挡出字：手机上翻一句要几百毫秒到两秒，若等它算完再发
+    // final，用户盯着空白等字幕——原文先落地，译文算完再以同 id 的 refine
+    // 补上（app.js 的 onRefine 会更新译文而不动位置）。
+    this._translateInto(payload);
+  }
+
+  async _translateInto(payload) {
+    const target = this.translateTo;
+    if (!target) return;
+    const seq = this.translateSeq;
+    const text = await mt.translate(payload.text, target);
+    if (!text || seq !== this.translateSeq) return; // 语向已切换，旧译文作废
+    this.handlers.onRefine &&
+      this.handlers.onRefine({ ...payload, type: 'refine', translation: text });
   }
 }
 

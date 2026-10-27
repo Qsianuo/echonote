@@ -7,7 +7,7 @@
   const PROTOCOL_VERSION = '4';
   // 静态资源版本号：与 index.html 里 style.css / app.js 的 ?v= 保持一致。
   // 改动前端文件时同步递增，浏览器才会重新拉取（worklet 模块同样受缓存）。
-  const ASSET_VERSION = "3f004ed30c";
+  const ASSET_VERSION = "b3e4111e9b";
   const RECONNECT_BASE_MS = 1500;
   const RECONNECT_MAX_MS = 15000;
   const RECONNECT_ATTEMPTS_CAP = 4;
@@ -116,6 +116,9 @@
     ws: null,
     connected: false,
     modelReady: false,
+    // 云端部署用 ECHONOTE_SKIP_PRELOAD 跳过启动期加载（沙箱启动探测有超时），
+    // 而"重试"按钮只在报错时出现。没有这个标记，未就绪时页面找不到任何入口。
+    autoKickTried: false,
     modelKey: '',
     modelName: '加载中',
     // The backend's /api/ready is the authority on which model is in use;
@@ -798,6 +801,21 @@
       setModelPill('idle', '模型加载中');
       setHint('正在加载模型，首次启动较慢，请稍等…');
       if (el.modelNotice) el.modelNotice.hidden = false;
+    }
+
+    // 服务空闲、未就绪、也没报错——说明根本没人触发加载。云端跳过启动期预加载
+    // 时就是这个状态，而界面上没有任何可点的入口（"重试"只在报错时出现），
+    // 页面会永久停在"模型加载中"。这里主动踢一脚，只踢一次，避免和轮询打架。
+    // 本地版预加载期间 loading 为 true，不会走到这里。
+    if (
+      !state.modelReady &&
+      !message.loading &&
+      !message.retrying &&
+      !message.error &&
+      !state.autoKickTried
+    ) {
+      state.autoKickTried = true;
+      retryModel();
     }
 
     updateRecordEnabled();

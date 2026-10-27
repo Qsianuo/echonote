@@ -12,7 +12,7 @@
 
 用法::
 
-    python tools/mt_onnx_smoke.py build/mt-onnx/mt-zh-en --text "把焦距调到五十毫米"
+    python tools/mt_onnx_smoke.py model-dist/mt-onnx/mt-zh-en --text "把焦距调到五十毫米"
 """
 
 from __future__ import annotations

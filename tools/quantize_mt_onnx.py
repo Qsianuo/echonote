@@ -9,7 +9,7 @@
 
 用法::
 
-    python tools/quantize_mt_onnx.py build/mt-onnx/mt-zh-en
+    python tools/quantize_mt_onnx.py model-dist/mt-onnx/mt-zh-en
 """
 
 from __future__ import annotations

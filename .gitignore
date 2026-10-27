@@ -28,6 +28,9 @@ tests/exports/
 # Packaging artifacts
 build/
 dist/
+# MT ONNX 导出/量化产物：故意放在 build/ 之外，因为 packaging/build.ps1 会递归删掉
+# build/ 整个目录，曾经把 3 GB 的 encoder/decoder ONNX 一起清空过一次。
+model-dist/
 EchoNote-*.zip
 *.spec.bak
 

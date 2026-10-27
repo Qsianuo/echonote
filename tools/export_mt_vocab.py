@@ -14,7 +14,7 @@ Android 侧只读文本、不解析 protobuf，也不依赖 sentencepiece 库。
 
 用法::
 
-    python tools/export_mt_vocab.py build/mt-onnx/mt-zh-en models/mt-zh-en
+    python tools/export_mt_vocab.py model-dist/mt-onnx/mt-zh-en models/mt-zh-en
 """
 
 from __future__ import annotations

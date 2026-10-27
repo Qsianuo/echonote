@@ -16,3 +16,7 @@ sherpa-onnx==1.13.8
 onnxruntime==1.23.2
 # 术语纠错（app/glossary.py）：按同音把「脚距」还原成「焦距」。
 pypinyin==0.55.0
+# 离线翻译（app/translate.py）：Opus-MT 的分词器。ctranslate2 由
+# faster-whisper 带入，运行时不新增推理引擎；缺这个包只是翻译不可用，
+# 转写路径不受影响（导入写在 translate._load 内部）。
+sentencepiece==0.2.2

@@ -24,7 +24,16 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from . import asr_sensevoice, asr_sherpa, config, glossary, models, protocol, stt
+from . import (
+    asr_sensevoice,
+    asr_sherpa,
+    config,
+    glossary,
+    models,
+    protocol,
+    stt,
+    translate,
+)
 from .live import LiveCaptioner
 from .timing import TurnTiming
 from .vad import Segmenter
@@ -273,6 +282,8 @@ def get_config() -> dict:
         "sample_rate": config.SAMPLE_RATE,
         "language": config.LANGUAGE,
         "languages": LANGUAGES,
+        # 离线翻译可选的目标语言；空列表 = 模型没装，前端不显示这个控件。
+        "translate_targets": translate.targets(),
         "live_step_s": config.LIVE_STEP_S,
         "live_captions": config.LIVE_CAPTIONS,
         "live_model": live.loader_value,
@@ -370,6 +381,9 @@ class StreamingSession:
         self.hotwords: str | None = config.HOTWORDS
         self.epoch = 1
         self.origin_ms = 0
+        # 译文语言："" = 不翻译（默认）。定稿文本产出后再翻一遍，原文始终保留，
+        # 所以翻译模型缺失、翻不动都不会丢掉任何一句话。
+        self.translate_to: str = ""
         self.results: asyncio.Queue = asyncio.Queue()
 
         self._audio: queue.Queue = queue.Queue(maxsize=config.AUDIO_QUEUE_MAX_FRAMES)
@@ -488,6 +502,7 @@ class StreamingSession:
         epoch: object,
         origin_ms: object,
         hotwords: object = None,
+        translate_to: object = None,
     ) -> None:
         """Apply a client ``config`` message.
 
@@ -515,6 +530,10 @@ class StreamingSession:
             # document cannot blow up the decoder prompt.
             text = " ".join(str(hotwords).split())[: config.HOTWORDS_MAX_CHARS]
             self.hotwords = text or None
+        if translate_to is not None:
+            # 只接受真的装了模型的语种，否则每句都会带一个永远为空的字段。
+            wanted = str(translate_to).strip()
+            self.translate_to = wanted if wanted in translate.targets() else ""
 
     # ------------------------------------------------------------- decoding
 
@@ -529,6 +548,16 @@ class StreamingSession:
         if text and config.GLOSSARY_TERMS:
             text = glossary.correct(text, config.GLOSSARY_TERMS)
         return text
+
+    def _translate(self, text: str) -> str | None:
+        """定稿文本的译文。None = 不翻（未开启 / 同语种 / 模型缺失）。
+
+        源语言由文本自己判，不跟识别语言走：用户把识别语言设成「中文」却说
+        英文时，识别结果仍是英文原文，只有按文本判断才能把它翻回中文。
+        """
+        if not self.translate_to:
+            return None
+        return translate.translate(text, self.translate_to)
 
     def _emit_partial(self, text: str, start_s: float) -> None:
         self._last_partial = text
@@ -751,6 +780,7 @@ class StreamingSession:
                 start=start,
                 end=end,
                 stable=stable,
+                translation=self._translate(text),
             )
         )
         self._last_final_text = text
@@ -835,7 +865,12 @@ class StreamingSession:
                 epoch = self.epoch
             self._emit(
                 protocol.refine(
-                    final_id=final_id, epoch=epoch, text=text, start=start, end=end
+                    final_id=final_id,
+                    epoch=epoch,
+                    text=text,
+                    start=start,
+                    end=end,
+                    translation=self._translate(text),
                 )
             )
             if turn is not None:
@@ -1034,6 +1069,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                         data.get("epoch"),
                         data.get("origin_ms"),
                         data.get("hotwords"),
+                        data.get("translate_to"),
                     )
                 elif kind == "flush":
                     session.flush()

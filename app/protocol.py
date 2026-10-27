@@ -147,13 +147,18 @@ def final(
     start: float,
     end: float,
     stable: bool = True,
+    translation: str | None = None,
 ) -> dict:
     """A completed utterance.
 
     ``stable=False`` means a more accurate pass is still running and may
     replace this text with :func:`refine` carrying the same ``id``.
+
+    ``translation`` rides along in the same message instead of a separate one:
+    two messages would make the client pair them by id, and one out-of-order
+    pair would put a translation under the wrong sentence.
     """
-    return {
+    message = {
         "type": "final",
         "id": str(final_id),
         "epoch": int(epoch),
@@ -162,14 +167,18 @@ def final(
         "end": round(_number(end, "end"), 2),
         "stable": bool(stable),
     }
+    if translation:
+        message["translation"] = str(translation)
+    return message
 
 
-def refine(*, final_id: str, epoch: int, text: str, start: float, end: float) -> dict:
+def refine(*, final_id: str, epoch: int, text: str, start: float, end: float,
+           translation: str | None = None) -> dict:
     """Replace the text of an earlier ``final`` (same ``id``).
 
     Only sent for finals that were emitted with ``stable=False``.
     """
-    return {
+    message = {
         "type": "refine",
         "id": str(final_id),
         "epoch": int(epoch),
@@ -177,6 +186,9 @@ def refine(*, final_id: str, epoch: int, text: str, start: float, end: float) ->
         "start": round(_number(start, "start"), 2),
         "end": round(_number(end, "end"), 2),
     }
+    if translation:
+        message["translation"] = str(translation)
+    return message
 
 
 def timing(

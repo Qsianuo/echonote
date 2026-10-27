@@ -7,7 +7,7 @@
   const PROTOCOL_VERSION = '4';
   // 静态资源版本号：与 index.html 里 style.css / app.js 的 ?v= 保持一致。
   // 改动前端文件时同步递增，浏览器才会重新拉取（worklet 模块同样受缓存）。
-  const ASSET_VERSION = "b3e4111e9b";
+  const ASSET_VERSION = "f9b3a1a1e2";
   const RECONNECT_BASE_MS = 1500;
   const RECONNECT_MAX_MS = 15000;
   const RECONNECT_ATTEMPTS_CAP = 4;
@@ -41,6 +41,8 @@
     connPill: document.getElementById('conn-pill'),
     modelPill: document.getElementById('model-pill'),
     language: document.getElementById('language'),
+    translateTo: document.getElementById('translate-to'),
+    translateField: document.getElementById('translate-field'),
     modeSelect: document.getElementById('mode-select'),
     pauseBtn: document.getElementById('pause-btn'),
     modelSelect: document.getElementById('model-select'),
@@ -152,6 +154,9 @@
     lastPartialText: '',
     language: 'zh',
     languages: [],
+    // 离线翻译：服务端只返回真的装了模型的语种；空数组就完全不显示这个控件。
+    translateTargets: [],
+    translateTo: '',
     mode: 'personal',
     paused: false,
     pausedAt: null,
@@ -591,6 +596,8 @@
         type: 'config',
         protocol: PROTOCOL_VERSION,
         language: state.language,
+        // "" = 不翻译。开启后每段定稿都会附一条译文，原文不受影响。
+        translate_to: state.translateTo || '',
         epoch: Math.max(1, state.epoch),
         origin_ms: Math.round(state.sessionOriginMs || 0),
       })
@@ -825,6 +832,7 @@
     const canRecord = state.modelReady && state.connected;
     el.recordBtn.disabled = !canRecord && !state.recording;
     el.language.disabled = !state.modelReady;
+    if (el.translateTo) el.translateTo.disabled = !state.modelReady;
     if (el.pauseBtn) el.pauseBtn.disabled = !state.recording;
     // The mode may be switched at any time (it applies from the next
     // recording), but not *while* one is running: a change mid-recording
@@ -887,6 +895,25 @@
       const defaultLanguage = config.language || 'zh';
       el.language.value = defaultLanguage;
       state.language = el.language.value;
+
+      // 译文语言：只有在真的装了翻译模型时才出现。没装就藏起来——
+      // 一个永远翻不出东西的下拉，比没有这个下拉更糟。
+      state.translateTargets = config.translate_targets || [];
+      if (el.translateTo && el.translateField) {
+        el.translateField.hidden = state.translateTargets.length === 0;
+        el.translateTo.textContent = '';
+        const off = document.createElement('option');
+        off.value = '';
+        off.textContent = '关闭';
+        el.translateTo.appendChild(off);
+        state.translateTargets.forEach((code) => {
+          const option = document.createElement('option');
+          option.value = code;
+          option.textContent = Expo.languageLabel(code, state.languages);
+          el.translateTo.appendChild(option);
+        });
+        el.translateTo.value = state.translateTo || '';
+      }
 
       if (el.modeSelect) {
         el.modeSelect.value = config.mode || 'personal';
@@ -1534,6 +1561,8 @@
     const item = {
       id: message.id,
       text: message.text,
+      // 译文明文随同一条消息下来；空 = 这段没翻（未开启 / 同语种 / 模型缺失）。
+      translation: message.translation ? String(message.translation).trim() : '',
       start: originSeconds + Number(message.start || 0),
       end: originSeconds + Number(message.end || 0),
       epoch: message.epoch,
@@ -1575,6 +1604,11 @@
       item.text = next;
       const text = row && row.querySelector('p');
       if (text) text.textContent = next;
+    }
+    const nextTranslation = String(message.translation || '').trim();
+    if (nextTranslation) {
+      item.translation = nextTranslation;
+      setRowTranslation(row, nextTranslation);
     }
     item.stable = true;
 
@@ -1681,8 +1715,15 @@
     const text = document.createElement('p');
     text.textContent = item.text;
 
+    // 正文包一层：译文要排在原文下面，而 .segment 是横向 flex，
+    // 直接把第二个 p 挂上去会被挤成并排的一列。
+    const body = document.createElement('div');
+    body.className = 'segment-body';
+    body.appendChild(text);
+
     row.appendChild(ts);
-    row.appendChild(text);
+    row.appendChild(body);
+    setRowTranslation(row, item.translation);
     el.finals.appendChild(row);
     rowIndex.set(item.id, { item, row });
 
@@ -1695,6 +1736,30 @@
     }
 
     scrollToBottom();
+  }
+
+  /**
+   * 在字幕行里放译文（原文在上、译文在下）。
+   *
+   * 译文是后到的：定稿先出原文，翻译再过 50~100 ms 才补上；精修也可能带来
+   * 新的译文。所以这里按需创建、按需删除，而不是行建好时就固定结构。
+   */
+  function setRowTranslation(row, text) {
+    if (!row) return;
+    let node = row.querySelector('p.translation');
+    const value = String(text || '').trim();
+    if (!value) {
+      if (node) node.remove();
+      return;
+    }
+    if (!node) {
+      node = document.createElement('p');
+      node.className = 'translation';
+      // 挂在正文容器里，译文才会排在原文下方而不是并排。
+      const body = row.querySelector('.segment-body') || row;
+      body.appendChild(node);
+    }
+    node.textContent = value;
   }
 
   function renderPartial() {
@@ -2547,6 +2612,19 @@
     sendConfig();
     announce(`识别语言已切换为${Expo.languageLabel(state.language, state.languages)}`);
   });
+
+  if (el.translateTo) {
+    el.translateTo.addEventListener('change', () => {
+      state.translateTo = el.translateTo.value;
+      // 立即下发：让下一段定稿就带译文，而不是等下一次重连。
+      sendConfig();
+      announce(
+        state.translateTo
+          ? `译文语言已设为${Expo.languageLabel(state.translateTo, state.languages)}`
+          : '已关闭译文'
+      );
+    });
+  }
 
   if (el.pauseBtn) {
     el.pauseBtn.addEventListener('click', togglePauseResume);

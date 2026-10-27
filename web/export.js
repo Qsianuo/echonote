@@ -80,7 +80,11 @@
   }
 
   function finalLines(finals) {
-    return (finals || []).map((item) => `[${formatClock(item.start)}] ${item.text}`);
+    return (finals || []).map((item) => {
+      const line = `[${formatClock(item.start)}] ${item.text}`;
+      // 译文缩进一行跟在原文下面：导出后仍然一眼能分清哪句是谁的语言。
+      return item.translation ? `${line}\n    ${item.translation}` : line;
+    });
   }
 
   function buildTxt(meta, finals) {
@@ -109,7 +113,10 @@
       '',
       '---',
       '',
-      ...(finals || []).map((item) => `- \`${formatClock(item.start)}\` ${item.text}`),
+      ...(finals || []).map((item) => {
+        const line = `- \`${formatClock(item.start)}\` ${item.text}`;
+        return item.translation ? `${line}\n  > ${item.translation}` : line;
+      }),
       '',
     ].join('\n');
   }
@@ -123,7 +130,9 @@
       .map((item, index) => {
         const start = Math.max(0, Number(item.start) || 0);
         const end = Math.max(Number(item.end) || 0, start + 1.5);
-        return `${index + 1}\n${srtTime(start)} --> ${srtTime(end)}\n${item.text}\n`;
+        // 双语字幕：原文一行、译文一行，播放器会同时显示。
+        const body = item.translation ? `${item.text}\n${item.translation}` : item.text;
+        return `${index + 1}\n${srtTime(start)} --> ${srtTime(end)}\n${body}\n`;
       })
       .join('\n');
   }

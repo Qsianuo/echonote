@@ -804,6 +804,20 @@ select {
   word-break: break-word;
 }
 
+/* 原文 + 译文的容器：.segment 是横向 flex（时间戳 | 正文 | 徽标），
+   译文必须待在这一列里，否则会被排到时间戳右侧成为并排的一栏。 */
+.segment-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.segment p.translation {
+  margin: 3px 0 0;
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--muted);
+}
+
 .partial {
   display: flex;
   align-items: baseline;

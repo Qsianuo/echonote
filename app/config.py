@@ -415,6 +415,14 @@ SENSEVOICE_THREADS = _env_int("ECHONOTE_SENSEVOICE_THREADS", 2)
 # Inverse text normalisation: "二零二六" -> "2026". Default on — these are notes.
 SENSEVOICE_USE_ITN = _env_flag("ECHONOTE_SENSEVOICE_ITN", default=True)
 
+# 离线翻译（可选）。模型放在 models/mt-<src>-<tgt>/，缺模型时功能自动关掉，
+# 转写路径完全不受影响。Opus-MT 77M int8，实测单句 50~100 ms。
+MT_ENABLED = _env_flag("ECHONOTE_MT", default=True)
+# Marian 必须走 beam search：beam_size=1 会退化出重复短语（实测整行
+# 「real-real-real-real-re-re-V」）。4 是 transformers 给这些模型的默认值。
+MT_BEAM_SIZE = max(1, _env_int("ECHONOTE_MT_BEAM_SIZE", 4))
+MT_MAX_DECODING_TOKENS = max(16, _env_int("ECHONOTE_MT_MAX_TOKENS", 256))
+
 # Which engine actually decodes: "whisper" (faster-whisper), "sherpa"
 # (streaming zipformer), "sensevoice" (offline SenseVoice finals, live caption
 # on another engine) or "remote" (OpenAI-compatible endpoint). Explicit env

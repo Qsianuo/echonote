@@ -63,7 +63,10 @@ ROOT_DIR = _data_dir()
 # APP_VERSION, never with the document.
 # --------------------------------------------------------------------------
 
-APP_VERSION = "1.0.2"
+# 构建时由 packaging/build.ps1 的 -Version 注入。以前这里写死一个字符串，
+# build.ps1 的 -Version 只改 zip 文件名，于是出现过「包名 1.0.3、界面 1.0.2」
+# 的两套版本号——发版时最容易误判自己验的是哪一版。
+APP_VERSION = os.getenv("ECHONOTE_APP_VERSION", "1.0.3").strip() or "1.0.3"
 APP_STAGE = "release"
 
 

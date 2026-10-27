@@ -36,6 +36,10 @@ function Invoke-Native([string]$What, [scriptblock]$Body) {
 
 Write-Host "==> Building EchoNote $Version" -ForegroundColor Cyan
 
+# Single source of truth for the version: app/config.py reads this instead of
+# carrying its own literal, so the exe, the zip name and the UI cannot drift.
+$env:ECHONOTE_APP_VERSION = $Version
+
 if (Test-Path build) { Remove-Item build -Recurse -Force }
 if (Test-Path dist) { Remove-Item dist -Recurse -Force }
 

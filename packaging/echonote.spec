@@ -22,14 +22,32 @@ binaries = []
 hiddenimports = []
 
 # Native stack: DLLs + data (e.g. faster_whisper/assets/silero_vad_v6.onnx).
-for package in ("faster_whisper", "ctranslate2", "onnxruntime", "tokenizers", "av", "huggingface_hub"):
+# sentencepiece 是离线翻译的分词器（app/translate.py 在函数内 import，
+# 静态分析能看到，但它的 .pyd 仍建议走 collect_all，避免运行时才报缺模块）。
+for package in (
+    "faster_whisper",
+    "ctranslate2",
+    "onnxruntime",
+    "tokenizers",
+    "av",
+    "huggingface_hub",
+    "sentencepiece",
+):
     pkg_datas, pkg_binaries, pkg_hidden = collect_all(package)
     datas += pkg_datas
     binaries += pkg_binaries
     hiddenimports += pkg_hidden
 
 # Version lookups at import time (importlib.metadata) need the wheel metadata.
-for dist in ("faster-whisper", "ctranslate2", "onnxruntime", "tokenizers", "huggingface_hub", "av"):
+for dist in (
+    "faster-whisper",
+    "ctranslate2",
+    "onnxruntime",
+    "tokenizers",
+    "huggingface_hub",
+    "av",
+    "sentencepiece",
+):
     datas += copy_metadata(dist)
 
 # uvicorn resolves its loop/protocol implementations by string at runtime.

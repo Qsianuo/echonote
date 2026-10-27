@@ -54,7 +54,7 @@ class SherpaMTPlugin : Plugin() {
         // 目录名是 mt-<源>-<目标>，而对外报的是"目标语种"，两者不是同一个东西：
         // target="en" 对应目录 mt-zh-en。这里必须反查，否则会去 mt-en 找模型。
         for ((target, direction) in DIRECTION_BY_TARGET) {
-            if (MtEngine.isInstalled(File(root, "mt-$direction"))) targets.put(target)
+            if (resolveDirectionDir(root, direction) != null) targets.put(target)
         }
         val ret = JSObject()
         ret.put("targets", normalizeTargets(targets))
@@ -77,8 +77,8 @@ class SherpaMTPlugin : Plugin() {
         worker.execute {
             try {
                 val engine = engines.getOrPut(direction) {
-                    val dir = File(root, "mt-$direction")
-                    if (!MtEngine.isInstalled(dir)) throw IllegalStateException("翻译模型未安装")
+                    val dir = resolveDirectionDir(root, direction)
+                        ?: throw IllegalStateException("翻译模型未安装")
                     MtEngine(dir, env)
                 }
                 val ret = JSObject()
@@ -127,6 +127,27 @@ class SherpaMTPlugin : Plugin() {
         val given = call.getString("root")
         if (!given.isNullOrBlank()) return dirOf(given)
         return File(context.filesDir, "models").absolutePath
+    }
+
+    /**
+     * 找一个方向到底用哪个目录，**先内部、后外部**。
+     *
+     * 内部 `files/models`（Capacitor 的 Directory.Data）只有 adb 调试包能写进去
+     * ——release 包不可 `run-as`，签名后的 APK 里用户根本没法把 226 MB 的模型
+     * 放进来，等于翻译功能装不上。所以再认一个位置：
+     *
+     *     /sdcard/Android/data/com.echonote.app/files/models/mt-zh-en/
+     *
+     * 这是 `getExternalFilesDir`，不需要任何存储权限，`adb push` 能写、
+     * 文件管理器也能进。两处都放时以内部为准（旧安装方式的行为不变）。
+     */
+    private fun resolveDirectionDir(root: String, direction: String): File? {
+        val name = "mt-$direction"
+        val candidates = listOfNotNull(
+            File(root, name),
+            context.getExternalFilesDir(null)?.let { File(it, "models/$name") },
+        )
+        return candidates.firstOrNull { MtEngine.isInstalled(it) }
     }
 
     private companion object {

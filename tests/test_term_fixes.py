@@ -72,3 +72,45 @@ def test_missing_table_means_no_change(monkeypatch, tmp_path):
     )
     assert term_fixes.load() == []
     assert term_fixes.apply("魔方匹配") == "魔方匹配"
+
+
+def test_qianghuo_trigger_is_sentence_scoped():
+    # 2026-10-28 用户确认「抢货→强度」，但触发串必须带完整句式：
+    # 放宽到「抢货的话」会误伤正常语境（见反例）。
+    rules = term_fixes.parse("抢货的话是什么意思 => 强度的话是什么意思\n")
+    assert term_fixes.apply("大家抢货的话是什么意思呢？", rules) == "大家强度的话是什么意思呢？"
+    assert term_fixes.apply("双11大家抢货的话要趁早。", rules) == "双11大家抢货的话要趁早。"
+
+
+def test_heibai_stutter_is_fixed_as_one_span():
+    rules = term_fixes.parse(
+        "黑台电黑台电话 => 黑白变化\n黑台电话 => 黑白变化\n黑台电 => 黑白变化\n"
+    )
+    out = term_fixes.apply("是黑台电黑台电话的那个梯度。", rules)
+    assert "黑白变化" in out and "黑台" not in out
+
+
+def test_haiganghui_maps_to_grayscale():
+    rules = term_fixes.parse("海港灰 => 灰度化\n")
+    assert term_fixes.apply("海港灰的话，目前的话就是按第三个。", rules).startswith("灰度化的话")
+
+
+def test_qianghuo_trigger_is_sentence_scoped():
+    # 2026-10-28 用户确认「抢货→强度」，但触发串必须带完整句式：
+    # 放宽到「抢货的话」会误伤正常语境（见反例）。
+    rules = term_fixes.parse("抢货的话是什么意思 => 强度的话是什么意思\n")
+    assert term_fixes.apply("大家抢货的话是什么意思呢？", rules) == "大家强度的话是什么意思呢？"
+    assert term_fixes.apply("双11大家抢货的话要趁早。", rules) == "双11大家抢货的话要趁早。"
+
+
+def test_heibai_stutter_is_fixed_as_one_span():
+    rules = term_fixes.parse(
+        "黑台电黑台电话 => 黑白变化\n黑台电话 => 黑白变化\n黑台电 => 黑白变化\n"
+    )
+    out = term_fixes.apply("是黑台电黑台电话的那个梯度。", rules)
+    assert "黑白变化" in out and "黑台" not in out
+
+
+def test_haiganghui_maps_to_grayscale():
+    rules = term_fixes.parse("海港灰 => 灰度化\n")
+    assert term_fixes.apply("海港灰的话，目前的话就是按第三个。", rules).startswith("灰度化的话")

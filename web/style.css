@@ -250,6 +250,8 @@ select {
   grid-template-columns: minmax(0, 1fr) 320px;
   gap: var(--sp-4);
   align-items: stretch;
+  /* 高屏上两栏要撑到底，否则首屏之外是一片空背景 */
+  min-height: calc(100dvh - 232px);
 }
 
 .panel {
@@ -758,9 +760,10 @@ select {
   background: rgba(255, 84, 112, 0.1);
   border: 1px solid rgba(255, 84, 112, 0.35);
 }
-/* flex 子项默认 min-width:auto，错误串里只要有不可断的长 token
-   （实测「模型加载失败：(MaxRetriesExceeded…)」宽 408px），就会把整个
-   控制面板撑到 462px，手机上出现横向滚动条。任意字符处都允许断行。 */
+/* flex 子项默认 min-width:auto：模型加载失败时 #error-text 里的不可断长串
+   （实测「模型加载失败：(MaxRetryError('HTTPSConnectionPool…」宽 408px）
+   会把整个控制面板从 390 撑到 462，手机上出现横向滚动条。
+   任意字符处允许断行，并允许收缩到容器宽度。 */
 .alert > span,
 .notice > span {
   min-width: 0;
@@ -1287,11 +1290,12 @@ dialog p b {
 
   .layout {
     grid-template-columns: minmax(0, 1fr);
-    padding: 0 var(--sp-4) calc(var(--sp-6) + 104px);
+    padding: 0 var(--sp-4) calc(var(--sp-8) * 3 + var(--sp-7));
   }
 
   .transcript-panel {
-    min-height: calc(100dvh - 264px);
+    /* 见底：视口高 - 头部 - 底部工具条（实测 213）- 余量 */
+    min-height: calc(100dvh - 420px);
     max-height: none;
   }
 
@@ -1346,6 +1350,21 @@ dialog p b {
     overscroll-behavior: contain;
   }
 
+  /* 触屏上没有物理键盘，底部的空格快捷键提示只占高度；模型信息在设置里 */
+  .panel-foot {
+    display: none;
+  }
+
+  /* 页脚是版权/隐私/版本这类元信息，手机上是纯噪声（隐私说明在设置里有一份），
+     留着只会被底部工具条压住并抬高页面高度 */
+  .page-foot {
+    display: none;
+  }
+
+  .empty {
+    min-height: 200px;
+  }
+
   /* 触控目标：所有可点元素 ≥44×44（P0-3 验收项） */
   .btn,
   .pause-btn,
@@ -1353,12 +1372,18 @@ dialog p b {
   .menu button,
   .gh-link,
   .empty-cta,
-  .settings-fold > summary,
-  /* 下拉框靠 padding + 字号撑到 42px，离 44 差 2px；实测 390 宽下 3 个 select
-     都是 356×42，补在这里而不是全局，避免桌面端下拉被无端拉高。 */
-  .field select {
+  select,
+  .settings-fold > summary {
     min-height: 44px;
     min-width: 44px;
+  }
+
+  /* 页脚链接是纯文字，撑高会改版式：用内边距把可点区抬到 44 */
+  .page-foot a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 var(--sp-2);
   }
 
   .play-seek {
@@ -1402,11 +1427,11 @@ dialog p b {
 
   .layout {
     grid-template-columns: minmax(0, 1fr);
-    padding: 0 var(--sp-4) calc(var(--sp-6) + 112px);
+    padding: 0 var(--sp-4) calc(var(--sp-8) * 3 + var(--sp-7));
   }
 
   .transcript-panel {
-    min-height: calc(100dvh - 272px);
+    min-height: calc(100dvh - 428px);
     max-height: none;
   }
 
@@ -1461,15 +1486,39 @@ dialog p b {
     overscroll-behavior: contain;
   }
 
+  /* 触屏上没有物理键盘，底部的空格快捷键提示只占高度；模型信息在设置里 */
+  .panel-foot {
+    display: none;
+  }
+
+  /* 页脚是版权/隐私/版本这类元信息，手机上是纯噪声（隐私说明在设置里有一份），
+     留着只会被底部工具条压住并抬高页面高度 */
+  .page-foot {
+    display: none;
+  }
+
+  .empty {
+    min-height: 200px;
+  }
+
   .btn,
   .pause-btn,
   .play-toggle,
   .menu button,
   .gh-link,
   .empty-cta,
+  select,
   .settings-fold > summary {
     min-height: 44px;
     min-width: 44px;
+  }
+
+  /* 页脚链接是纯文字，撑高会改版式：用内边距把可点区抬到 44 */
+  .page-foot a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 var(--sp-2);
   }
 
   .play-seek {

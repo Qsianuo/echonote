@@ -19,11 +19,11 @@
  * app.js 的 boot() 因此挂到 DOMContentLoaded，保证注册先于启动安装。
  */
 
-import { MobileEngine } from './native-engine.js?v=ad355fbcb3';
-import { MODES } from './native-vad.js?v=ad355fbcb3';
-import { sherpa } from './native-sherpa.js?v=ad355fbcb3';
-import { mt } from './native-translate.js?v=ad355fbcb3';
-import { initMtModels } from './mt-models.js?v=ad355fbcb3';
+import { MobileEngine } from './native-engine.js?v=02c6f7957c';
+import { MODES } from './native-vad.js?v=02c6f7957c';
+import { sherpa } from './native-sherpa.js?v=02c6f7957c';
+import { mt } from './native-translate.js?v=02c6f7957c';
+import { initMtModels } from './mt-models.js?v=02c6f7957c';
 
 const isNative = typeof window !== 'undefined' && !!window.Capacitor;
 if (isNative) install();

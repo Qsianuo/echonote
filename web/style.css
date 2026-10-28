@@ -170,7 +170,7 @@ select {
   color: var(--muted);
   font-weight: 500;
   font-size: var(--fs-3);
-  margin-left: 4px;
+  margin-left: var(--sp-1);
 }
 
 .brand-text p {
@@ -297,7 +297,7 @@ select {
 .control-panel {
   display: flex;
   flex-direction: column;
-  padding-bottom: 20px;
+  padding-bottom: var(--sp-4);
 }
 
 .recorder {
@@ -692,7 +692,7 @@ select {
 /* 「从文件导入」是次选路径：文字按钮，不跟主按钮抢注意力。 */
 .mt-import {
   align-self: flex-start;
-  margin-top: 1px;
+  margin-top: var(--sp-1);
   padding: 0;
   border: 0;
   background: none;
@@ -913,7 +913,7 @@ select {
   color: rgba(100, 255, 218, 0.5);
   border: 1px dashed rgba(100, 255, 218, 0.2);
   background: rgba(100, 255, 218, 0.03);
-  margin-bottom: 4px;
+  margin-bottom: var(--sp-1);
 }
 
 .empty p {
@@ -1016,7 +1016,7 @@ select {
   font-family: var(--mono);
   font-size: var(--fs-1);
   color: var(--accent-dim);
-  padding-top: 5px;
+  padding-top: var(--sp-2);
   min-width: 44px;
 }
 
@@ -1057,7 +1057,7 @@ select {
   display: inline-block;
   width: 7px;
   height: 16px;
-  margin-left: 3px;
+  margin-left: var(--sp-1);
   background: var(--accent);
   border-radius: var(--r-inline);
   animation: blink 1s steps(2, start) infinite;
@@ -1578,7 +1578,7 @@ dialog p b {
   font-size: var(--fs-5);
   letter-spacing: 0.06em;
   color: #e8f1ff;
-  margin-top: 10px;
+  margin-top: var(--sp-3);
 }
 
 .splash-title span {
@@ -1597,7 +1597,7 @@ dialog p b {
   border: 1px solid rgba(232, 241, 255, 0.16);
   border-radius: var(--r-pill);
   padding: var(--sp-1) var(--sp-3);
-  margin-top: 6px;
+  margin-top: var(--sp-2);
 }
 
 @media (prefers-reduced-motion: reduce) {

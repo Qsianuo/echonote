@@ -20,7 +20,7 @@
  * 改术语表后重跑该脚本（桌面端不受影响，它读的是同一份 .txt）。
  */
 
-import { PINYIN, TERMS } from './glossary-data.js';
+import { PINYIN, TERMS, TERM_FIXES } from './glossary-data.js';
 
 const HAN = /^[\u4e00-\u9fa5]$/;
 
@@ -160,4 +160,22 @@ function buildTable(terms) {
 export function termCount() {
   ensureIndex();
   return termTable.length;
+}
+
+
+/**
+ * 非同音错词表的整串替换（桌面端对应 app/term_fixes.py）。
+ *
+ * 读音纠错救不了「魔方匹配 → 模板匹配」这种整词听错——两者读音完全不同。
+ * 这里只认表里写明的串，长串优先，不猜、不做模糊匹配：这一层没有词边界，
+ * 一放宽就必然误伤。
+ */
+export function applyFixes(text, rules = null) {
+  if (!text) return text;
+  const table = rules || TERM_FIXES || [];
+  let out = text;
+  for (const [wrong, right] of table) {
+    if (wrong && out.includes(wrong)) out = out.split(wrong).join(right);
+  }
+  return out;
 }

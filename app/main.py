@@ -32,6 +32,7 @@ from . import (
     models,
     protocol,
     stt,
+    term_fixes,
     translate,
 )
 from .live import LiveCaptioner
@@ -547,6 +548,9 @@ class StreamingSession:
         # 不动实时字幕（边出字时句子还在长，纠错会在半句上误判）。
         if text and config.GLOSSARY_TERMS:
             text = glossary.correct(text, config.GLOSSARY_TERMS)
+        # 非同音的整词听错（魔方匹配 → 模板匹配）走另一张表：读音纠错救不了它们。
+        if text:
+            text = term_fixes.apply(text)
         return text
 
     def _translate(self, text: str) -> str | None:

@@ -29,6 +29,7 @@ from pypinyin import Style, pinyin
 
 ROOT = Path(__file__).resolve().parent.parent
 GLOSSARY = ROOT / "models" / "glossary.txt"
+TERM_FIXES = ROOT / "models" / "term-fixes.txt"
 OUT = ROOT / "web" / "glossary-data.js"
 
 # GB2312 一级 + 二级汉字区间（按字节对枚举）。
@@ -82,7 +83,24 @@ def pinyin_groups(chars: list[str]) -> dict[str, list[str]]:
     return groups
 
 
-def render(terms: list[str], groups: dict[str, list[str]]) -> str:
+def load_term_fixes() -> list[tuple[str, str]]:
+    """读非同音错词表（错串 => 正词），长串在前。"""
+    if not TERM_FIXES.exists():
+        return []
+    rules: list[tuple[str, str]] = []
+    for raw in TERM_FIXES.read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        wrong, sep, right = line.partition("=>")
+        if sep and wrong.strip() and right.strip():
+            rules.append((wrong.strip(), right.strip()))
+    rules.sort(key=lambda item: len(item[0]), reverse=True)
+    return rules
+
+
+def render(terms: list[str], groups: dict[str, list[str]],
+           fixes: list[tuple[str, str]] | None = None) -> str:
     lines = [
         "// 自动生成，请勿手改 —— 改术语表后跑 tools/gen_glossary_data.py。",
         "// 来源：models/glossary.txt + pypinyin（GB2312 6763 字，无调读音）。",
@@ -100,12 +118,18 @@ def render(terms: list[str], groups: dict[str, list[str]]) -> str:
         lines.append("  '" + syllable + ":" + "".join(groups[syllable]) + "',")
     lines.append("].join('\\n');")
     lines.append("")
+    lines.append("// 非同音错词表（models/term-fixes.txt）：[错串, 正词]，长串在前。")
+    lines.append("export const TERM_FIXES = [")
+    for wrong, right in fixes or []:
+        lines.append(f"  ['{wrong}', '{right}'],")
+    lines.append("];")
+    lines.append("")
     return "\n".join(lines)
 
 
 def generate() -> str:
     """纯函数：返回应当写出的 JS 文本（不落盘，测试直接比对）。"""
-    return render(load_terms(), pinyin_groups(gb2312_chars()))
+    return render(load_terms(), pinyin_groups(gb2312_chars()), load_term_fixes())
 
 
 def main() -> int:

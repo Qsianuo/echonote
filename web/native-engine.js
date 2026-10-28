@@ -12,10 +12,10 @@
  *  · 定稿永远用 SenseVoice（离线、带标点）；流式文本只做字幕与兜底。
  */
 
-import { correct as fixTerms } from './glossary.js';
-import { Segmenter, MODES } from './native-vad.js?v=a7ae54fa43';
-import { sherpa } from './native-sherpa.js?v=a7ae54fa43';
-import { mt } from './native-translate.js?v=a7ae54fa43';
+import { correct as fixTerms, applyFixes } from './glossary.js';
+import { Segmenter, MODES } from './native-vad.js?v=0c6e072bfb';
+import { sherpa } from './native-sherpa.js?v=0c6e072bfb';
+import { mt } from './native-translate.js?v=0c6e072bfb';
 
 const LIVE_STEP_S = 0.6;
 const MIN_FIRST_DECODE_S = 2.0;
@@ -156,6 +156,8 @@ export class MobileEngine {
     // 实时字幕边出边长，在半句上按读音纠错会把还在变的词判错。桌面的术语表
     // 可由用户编辑，移动端随包固化——改术语表要重跑 tools/gen_glossary_data.py。
     text = fixTerms(text);
+    // 非同音的整词听错（魔方匹配 → 模板匹配）走另一张表，与桌面端同源。
+    text = applyFixes(text);
 
     this.finalSeq += 1;
     this.lastFinalText = text;

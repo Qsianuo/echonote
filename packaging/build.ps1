@@ -50,6 +50,21 @@ $out = Join-Path $root "dist\EchoNote"
 Copy-Item README.md, LICENSE -Destination $out
 Copy-Item packaging\extras\*.bat -Destination $out
 
+# 术语表必须随包走。config._terms_file() 在文件不存在时直接返回空表，也就是
+# 说打包时漏掉它，新装用户的同音纠错（脚距→焦距）和非同音错词表（魔方匹配→
+# 模板匹配）全是空的，而且界面上看不出来——v1.0.3 的包就是这样。
+$modelTexts = @("glossary.txt", "term-fixes.txt")
+foreach ($name in $modelTexts) {
+    $source = Join-Path $root "models\$name"
+    if (Test-Path $source) {
+        New-Item -ItemType Directory -Force -Path (Join-Path $out "models") | Out-Null
+        Copy-Item $source -Destination (Join-Path $out "models")
+    }
+    else {
+        Write-Host "WARNING: models\$name 不存在，包里将没有这份表" -ForegroundColor Yellow
+    }
+}
+
 if (-not $SkipTest) {
     Write-Host "==> Smoke testing the frozen build" -ForegroundColor Cyan
     Invoke-Native "smoke test" {

@@ -817,6 +817,9 @@ class StreamingSession:
                 # queue instead of by the length of the recording.
                 self._timings.pop(dropped[0], None)
                 self._refine.task_done()
+                # 告诉客户端这一句不会再有精修了。没有这条消息，那一行会一直
+                # 挂着「精修中」，用户以为它还在算。
+                self._emit_refine_skip(dropped[0])
                 if not self._warned_refine:
                     self._warned_refine = True
                     log.warning(
@@ -831,15 +834,54 @@ class StreamingSession:
             self._refine_pending += 1
             self._refine_seconds += held
 
+    def _emit_refine_skip(self, final_id: str) -> None:
+        """一条「这句不精修了」的消息。id 不合法就放弃——协议比提示重要。"""
+        try:
+            epoch = int(str(final_id).split("-")[0])
+        except (ValueError, IndexError):
+            return
+        try:
+            self._emit(protocol.refine_skip(final_id=final_id, epoch=epoch, reason="backlog"))
+        except protocol.ProtocolError:
+            log.debug("Skipped malformed refine_skip for %r", final_id)
+
+    def _refine_turn(self, holding_s: float) -> bool:
+        """等到一个可以跑精修的时刻。返回 False 表示会话正在收尾，别再跑了。
+
+        2026-10-28 之前这里是「说话就完全不跑」，实测连续讲课会把队列顶到
+        240 秒上限然后丢段落。现在按积压分三档（见 config.REFINE_YIELD_*）：
+        队列短时照旧让行，队列变长时限速让行，越过红线则不再让行。
+        """
+        while not self._stop.is_set():
+            with self._refine_lock:
+                backlog = self._refine_seconds
+            busy = self._speaking or self._foreground
+            if not busy:
+                return True
+            if backlog >= config.REFINE_URGENT_BACKLOG_S:
+                return True
+            if backlog <= config.REFINE_YIELD_BELOW_S:
+                # 实时优先：队列还短，等一下不吃亏。
+                time.sleep(0.05)
+                continue
+            # 限速：按这段音频的长度睡一小会，既不拖慢实时字幕，也不让队列
+            # 一路涨到丢段落。
+            pause = min(config.REFINE_THROTTLE_SLEEP_S, holding_s * config.REFINE_THROTTLE_RATIO)
+            if pause > 0:
+                time.sleep(pause)
+            return True
+        return False
+
     def _refine_loop(self) -> None:
         while True:
             job = self._refine.get()
             if job is None:
                 return
-            # Yield to anything the user is waiting for: a decode that shares
-            # four cores with the live caption makes both of them late.
-            while not self._stop.is_set() and (self._speaking or self._foreground):
-                time.sleep(0.05)
+            # Yield to anything the user is waiting for, but no longer
+            # unconditionally — see _refine_turn.
+            if not self._refine_turn(len(job[1]) / config.SAMPLE_RATE):
+                self._refine.task_done()
+                return
             final_id, audio, start, end = job
             try:
                 text = self._decode_final(audio)

@@ -19,6 +19,11 @@ carrying the milliseconds between the end of speech and each visible
 milestone. It is purely diagnostic — a client that ignores it loses nothing
 but the performance numbers, which is why the change is additive in spirit
 and versioned anyway: the message set changed again.
+
+v4 also grew ``refine_skip`` without a version bump: a ``final`` that will
+never be refined (dropped by the backlog cap) now says so, instead of leaving
+the client's "精修中" badge spinning forever. Clients that predate it simply
+ignore an unknown type — and the worst case is the old behaviour.
 """
 
 from __future__ import annotations
@@ -191,6 +196,25 @@ def refine(*, final_id: str, epoch: int, text: str, start: float, end: float,
     return message
 
 
+def refine_skip(*, final_id: str, epoch: int, reason: str = "backlog") -> dict:
+    """Tell the client this utterance will never be refined (v4, additive).
+
+    Before this message existed, a final dropped by the backlog cap kept its
+    ``精修中`` badge forever: the server silently discarded the job and the
+    client had no way to learn that no ``refine`` was coming. The row looked
+    busy for the rest of the session.
+
+    ``reason`` is a short machine-readable string (``backlog`` today); the UI
+    only needs to know that the wait is over.
+    """
+    return {
+        "type": "refine_skip",
+        "id": str(final_id),
+        "epoch": int(epoch),
+        "reason": str(reason),
+    }
+
+
 def timing(
     *,
     epoch: int,
@@ -263,6 +287,7 @@ _REQUIRED: dict[str, dict[str, type | tuple[type, ...]]] = {
     },
     "error": {"code": str, "message": str, "retryable": bool},
     "warning": {"code": str, "dropped_ms": int},
+    "refine_skip": {"id": str, "epoch": int, "reason": str},
     "timing": {
         "epoch": int,
         "turn_id": str,
@@ -306,6 +331,11 @@ def validate(message: dict) -> dict:
             raise ProtocolError(f"{kind}.text must not be empty")
         if _number(message["end"], "end") < _number(message["start"], "start"):
             raise ProtocolError(f"{kind}.end must be >= {kind}.start")
+    elif kind == "refine_skip":
+        if not _FINAL_ID.match(message["id"]):
+            raise ProtocolError("refine_skip.id must be 'epoch-sequence'")
+        if int(message["id"].split("-")[0]) != message["epoch"]:
+            raise ProtocolError("refine_skip.id prefix must match refine_skip.epoch")
     elif kind == "error":
         if message["code"] not in ERROR_CODES:
             raise ProtocolError(f"unknown error code: {message['code']}")

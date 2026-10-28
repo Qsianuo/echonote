@@ -598,6 +598,23 @@ REFINE_FINALS = not _env_flag("ECHONOTE_DISABLE_REFINE")
 # queues instead of losing work.
 REFINE_BACKLOG_SECONDS = max(30.0, _env_float("ECHONOTE_REFINE_BACKLOG_S", 240.0))
 
+# 精修让行的三段线（2026-10-28 加入）。
+#
+# 原来的让行是「一刀切」：只要还在说话或前台解码，精修线程就完全不跑。实测
+# 一场 33 分钟的连续讲课因此一路涨到 240 秒上限，被迫丢掉最老的几段，那些
+# 段落永远停在流式文本（无标点、句子碎）——用户看到的就是「精修落后」。
+# 现在按积压程度分三档：
+#   * 积压 ≤ REFINE_YIELD_BELOW_S：维持原样，完全让给实时字幕（首屏延迟优先）
+#   * 介于两者之间：限速让行，跑一段睡一小会，既不拖慢实时也不让队列涨上去
+#   * ≥ REFINE_URGENT_BACKLOG_S：不再让行，先把队列压下来（实时可能抖一下）
+REFINE_YIELD_BELOW_S = max(0.0, _env_float("ECHONOTE_REFINE_YIELD_BELOW_S", 60.0))
+REFINE_URGENT_BACKLOG_S = max(
+    REFINE_YIELD_BELOW_S + 1.0, _env_float("ECHONOTE_REFINE_URGENT_BACKLOG_S", 180.0)
+)
+# 限速时每处理完一段睡多久：按被处理音频长度的比例，最多 0.3 s。
+REFINE_THROTTLE_SLEEP_S = max(0.0, _env_float("ECHONOTE_REFINE_THROTTLE_SLEEP_S", 0.3))
+REFINE_THROTTLE_RATIO = max(0.0, _env_float("ECHONOTE_REFINE_THROTTLE_RATIO", 0.2))
+
 # Upper bound on how long a closing session waits for pending refinements
 # before it says "done". Anything still queued keeps its provisional text.
 # 25 s covers two sentences of the accurate pass; longer would make "停止"

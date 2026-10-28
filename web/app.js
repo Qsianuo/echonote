@@ -7,7 +7,7 @@
   const PROTOCOL_VERSION = '4';
   // 静态资源版本号：与 index.html 里 style.css / app.js 的 ?v= 保持一致。
   // 改动前端文件时同步递增，浏览器才会重新拉取（worklet 模块同样受缓存）。
-  const ASSET_VERSION = "6a5c42e547";
+  const ASSET_VERSION = "a7ae54fa43";
   const RECONNECT_BASE_MS = 1500;
   const RECONNECT_MAX_MS = 15000;
   const RECONNECT_ATTEMPTS_CAP = 4;
@@ -642,6 +642,11 @@
         break;
       case 'refine':
         onRefine(message);
+        break;
+      case 'refine_skip':
+        // 服务端认输：这一句不会再精修了（队列爆了，被丢的是最老的那几条）。
+        // 不清徽标的话，它会一直挂着「精修中」，看起来像还在算。
+        onRefineSkip(message);
         break;
       case 'error':
         onServerError(message);
@@ -1611,6 +1616,21 @@
    * The row keeps its position and timestamp; only the words change, so a
    * reader never sees the transcript jump around.
    */
+  /**
+   * Server `refine_skip`: 这句的精修被丢掉了，不会再回来。
+   *
+   * 只处理「还在等」的行：已经精修过或还没落地的 id 直接忽略——乱序到达时
+   * 不能把一句已经有终稿的句子又改回「未精修」。
+   */
+  function onRefineSkip(message) {
+    const entry = rowIndex.get(message.id);
+    if (!entry) return;
+    const { item, row } = entry;
+    if (item.stable) return;
+    item.stable = true;
+    if (row) setRowBadge(row, '未精修', false);
+  }
+
   function onRefine(message) {
     const entry = rowIndex.get(message.id);
     if (!entry) return;

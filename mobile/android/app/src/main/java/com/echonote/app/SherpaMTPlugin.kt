@@ -3,11 +3,15 @@ package com.echonote.app
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.result.ActivityResult
 import com.getcapacitor.JSArray
 import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
+import com.getcapacitor.annotation.ActivityCallback
 import com.getcapacitor.annotation.CapacitorPlugin
 import java.io.File
 import java.io.FileOutputStream
@@ -108,6 +112,9 @@ class SherpaMTPlugin : Plugin() {
     @Volatile
     private var cancelRequested = false
 
+    /** 用户在系统文件选择器里挑的那次导入，属于哪个方向。 */
+    private var pendingImport: String? = null
+
     /**
      * 两个方向的安装状态。界面据此决定按钮是「下载」还是「已安装」，
      * 也据此算还要腾多少空间（freeBytes 是安装位置的可用空间）。
@@ -172,46 +179,195 @@ class SherpaMTPlugin : Plugin() {
         call.resolve(ret)
     }
 
+    /**
+     * 从本地 zip 安装：打开系统文件选择器，用户挑一个模型包即可。
+     *
+     * 为什么值得单开一条路：模型 148 MB 挂在国际链路上，国内用户经常下到一半
+     * 断掉；而他们从网盘、U 盘、聊天记录里拿到同一个 zip 的概率很高。有了这条，
+     * "装不上"就从网络问题退化成文件问题——文件问题用户自己能解。
+     */
+    @PluginMethod
+    fun importModel(call: PluginCall) {
+        val direction = call.getString("direction") ?: return call.reject("缺少 direction")
+        if (!TARGET_BY_DIRECTION.containsKey(direction)) return call.reject("未知方向 $direction")
+        if (installing != null) return call.reject("另一个方向的模型正在安装，请稍候")
+
+        pendingImport = direction
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            // 不锁死 MIME：部分文件管理器给 zip 报 application/octet-stream，
+            // 甚至 application/x-zip-compressed。真正的校验在解压前那次前缀检查。
+            type = "*/*"
+            putExtra(
+                Intent.EXTRA_MIME_TYPES,
+                arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"),
+            )
+        }
+        startActivityForResult(call, intent, "importPicked")
+    }
+
+    @ActivityCallback
+    private fun importPicked(call: PluginCall?, result: ActivityResult) {
+        val direction = pendingImport
+        pendingImport = null
+        if (call == null) return
+
+        val uri = result.data?.data
+        if (result.resultCode != android.app.Activity.RESULT_OK || uri == null) {
+            val ret = JSObject()
+            ret.put("ok", false)
+            ret.put("cancelled", true)
+            call.resolve(ret)
+            return
+        }
+        if (direction == null) return call.reject("导入状态丢失，请重试")
+
+        installing = direction
+        cancelRequested = false
+        installer.execute {
+            try {
+                call.resolve(importFromUri(direction, uri))
+            } catch (e: InstallCancelled) {
+                val ret = JSObject()
+                ret.put("ok", false)
+                ret.put("cancelled", true)
+                call.resolve(ret)
+            } catch (e: Exception) {
+                call.reject("翻译模型导入失败：${e.message}")
+            } finally {
+                installing = null
+                cancelRequested = false
+            }
+        }
+    }
+
+    /** 把选择器给的 content:// 复制到沙盒临时文件；进度按字节上报。 */
+    private fun copyUri(uri: Uri, target: File, direction: String) {
+        val total = contentLength(uri)
+        var received = 0L
+        var lastNotify = 0L
+        val input = context.contentResolver.openInputStream(uri)
+            ?: throw IllegalStateException("无法读取所选文件")
+        input.use { ins ->
+            FileOutputStream(target).use { out ->
+                val buf = ByteArray(256 * 1024)
+                while (true) {
+                    if (cancelRequested) throw InstallCancelled()
+                    val n = ins.read(buf)
+                    if (n < 0) break
+                    out.write(buf, 0, n)
+                    received += n
+                    val now = System.currentTimeMillis()
+                    if (now - lastNotify > 300) {
+                        lastNotify = now
+                        notifyMt(direction, "copy", received, total)
+                    }
+                }
+            }
+        }
+        if (received == 0L) throw IllegalStateException("所选文件是空的")
+        notifyMt(direction, "copy", received, maxOf(total, received))
+    }
+
+    /** content:// 的长度；拿不到返回 -1（进度条退化成"已读多少"）。 */
+    private fun contentLength(uri: Uri): Long = try {
+        context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
+    } catch (e: Exception) {
+        -1L
+    }
+
+    /**
+     * 从网络装一个方向：下载 → sha256 校验 → 交给 [placeFromZip] 落位。
+     */
     private fun install(direction: String, givenRoot: String?): JSObject {
         val ret = JSObject()
         ret.put("direction", direction)
         val root = writableRoot(givenRoot)
-        val target = File(root, "mt-$direction")
-
-        // 已经装好就不要再下 148 MB：内部（旧 adb 布局）与外部都算装好。
-        if (MtEngine.isInstalled(target)) return installedResult(ret, target, verified = true)
-        resolveDirectionDir(root.absolutePath, direction)?.let { existing ->
+        alreadyInstalled(root, direction)?.let { existing ->
             return installedResult(ret, existing, verified = true)
         }
 
-        val work = File(root, ".mt-install")
-        if (!work.isDirectory && !work.mkdirs()) throw IllegalStateException("无法创建临时目录")
+        val work = ensureWork(root)
         val zipName = "mt-$direction-int8.zip"
         val url = RELEASE_BASE + zipName
         val zip = File(work, zipName)
-        val staging = File(work, "$direction.part")
 
         try {
-            staging.deleteRecursively()
             zip.delete()
 
             notifyMt(direction, "resolve")
             val total = headContentLength(url)
             // 需要同时装下 zip（154 MB）与解压结果（237 MB）≈ 2.7 倍；总量未知时按 520 MB 估。
-            val needed = if (total > 0) (total * 2.7).toLong() else 520L * 1024 * 1024
-            val usable = root.usableSpace
-            if (usable in 1 until needed) {
-                throw IllegalStateException(
-                    "存储空间不足：需要约 ${mb(needed)} MB，可用 ${mb(usable)} MB"
-                )
-            }
+            requireSpace(root, if (total > 0) (total * 2.7).toLong() else 520L * 1024 * 1024)
 
             notifyMt(direction, "download", 0, total)
             download(url, zip, total, direction)
 
             notifyMt(direction, "verify")
             val verified = verifyChecksum(zip, "$url.sha256")
+            return placeFromZip(direction, zip, root, ret, verified)
+        } finally {
+            zip.delete()
+            cleanupWork(work)
+        }
+    }
 
+    /**
+     * 从本地 zip 装一个方向（用户在设置页选文件）。内容已经在本机，跳过 sha256
+     * ——没有可信的摘要可对，完整性靠解压后的 5 文件检查兜底。
+     */
+    private fun importFromUri(direction: String, uri: android.net.Uri): JSObject {
+        val ret = JSObject()
+        ret.put("direction", direction)
+        val root = writableRoot(null)
+        alreadyInstalled(root, direction)?.let { existing ->
+            return installedResult(ret, existing, verified = true)
+        }
+
+        val work = ensureWork(root)
+        val tmp = File(work, "import-$direction.zip")
+        try {
+            tmp.delete()
+            notifyMt(direction, "copy", 0, contentLength(uri))
+            copyUri(uri, tmp, direction)
+            return placeFromZip(direction, tmp, root, ret, verified = false)
+        } finally {
+            tmp.delete()
+            cleanupWork(work)
+        }
+    }
+
+    /** 已装好的方向直接返回（内部旧布局与外部都算），省一次 148 MB 下载/解压。 */
+    private fun alreadyInstalled(root: File, direction: String): File? {
+        val target = File(root, "mt-$direction")
+        if (MtEngine.isInstalled(target)) return target
+        return resolveDirectionDir(root.absolutePath, direction)
+    }
+
+    /**
+     * 解压并落位。下载与本地导入共用这一段——两条路的包结构相同，
+     * 差别只在"包从哪来"和"能不能校验 sha256"。
+     */
+    private fun placeFromZip(
+        direction: String,
+        zip: File,
+        root: File,
+        ret: JSObject,
+        verified: Boolean,
+    ): JSObject {
+        // 方向先对名字：装反的方向比"没装"更难查（译文全错但界面显示已安装）。
+        if (!MtArchive.hasDirection(zip, direction)) {
+            throw IllegalStateException(
+                "这个包里没有 mt-$direction/ 目录，可能选错了方向或下错了文件"
+            )
+        }
+        requireSpace(root, 320L * 1024 * 1024)
+
+        val work = ensureWork(root)
+        val staging = File(work, "$direction.part")
+        val target = File(root, "mt-$direction")
+        try {
+            staging.deleteRecursively()
             notifyMt(direction, "unzip")
             MtArchive.extract(
                 zip,
@@ -220,8 +376,8 @@ class SherpaMTPlugin : Plugin() {
                 cancelled = { cancelRequested },
             )
 
-            val src = MtArchive.findModelDir(staging, direction)
-                ?: throw IllegalStateException("模型包内容不完整（找不到 ${MtArchive.MODEL_FILES.first()}）")
+            val src = MtArchive.directionDir(staging, direction)
+                ?: throw IllegalStateException("模型包内容不完整（找不到 mt-$direction/ 下的模型文件）")
             if (!MtEngine.isInstalled(src)) {
                 throw IllegalStateException("解压结果未通过完整性检查")
             }
@@ -239,10 +395,27 @@ class SherpaMTPlugin : Plugin() {
             return installedResult(ret, target, verified)
         } finally {
             staging.deleteRecursively()
-            zip.delete()
-            // 临时目录空了就顺手删掉，别在用户存储里留空壳。
-            if (work.listFiles()?.isEmpty() == true) work.delete()
+            cleanupWork(work)
         }
+    }
+
+    private fun requireSpace(root: File, needed: Long) {
+        val usable = root.usableSpace
+        if (usable in 1 until needed) {
+            throw IllegalStateException(
+                "存储空间不足：需要约 ${mb(needed)} MB，可用 ${mb(usable)} MB"
+            )
+        }
+    }
+
+    private fun ensureWork(root: File): File {
+        val work = File(root, ".mt-install")
+        if (!work.isDirectory && !work.mkdirs()) throw IllegalStateException("无法创建临时目录")
+        return work
+    }
+
+    private fun cleanupWork(work: File) {
+        if (work.listFiles()?.isEmpty() == true) work.delete()
     }
 
     private fun installedResult(ret: JSObject, dir: File, verified: Boolean): JSObject {

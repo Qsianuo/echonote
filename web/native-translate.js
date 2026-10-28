@@ -108,6 +108,18 @@ export const mt = {
   },
 
   /**
+   * 从本地文件导入一个方向的模型：原生侧弹系统文件选择器，用户挑 zip 即可。
+   * 用户取消时返回 ``{ ok:false, cancelled:true }``。
+   */
+  async importZip(direction) {
+    const plugin = bridge();
+    if (!plugin || typeof plugin.importModel !== 'function') {
+      throw new Error('当前环境不支持从文件导入');
+    }
+    return plugin.importModel({ direction });
+  },
+
+  /**
    * 订阅安装进度，返回取消订阅函数。事件形状：
    * ``{direction, phase, received?, total?, entries?, bytes?}``，
    * phase ∈ resolve / download / verify / unzip / done。

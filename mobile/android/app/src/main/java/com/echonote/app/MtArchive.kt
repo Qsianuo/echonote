@@ -110,15 +110,39 @@ internal object MtArchive {
      * 再退一步只认"能通过 isInstalled 判据的目录"——比写死层级更耐用。
      */
     fun findModelDir(root: File, direction: String): File? {
-        fun installed(dir: File): Boolean =
-            MODEL_FILES.all { name -> File(dir, name).let { it.isFile && it.length() > 0 } }
-
-        if (installed(root)) return root
+        if (isModelDir(root)) return root
         val named = File(root, "mt-$direction")
-        if (installed(named)) return named
+        if (isModelDir(named)) return named
         return root.listFiles()
             ?.filter { it.isDirectory }
-            ?.firstOrNull { installed(it) }
+            ?.firstOrNull { isModelDir(it) }
+    }
+
+    /** 只认 `mt-<direction>/`：导入第三方包时不能靠"猜"，方向错了比没装更糟。 */
+    fun directionDir(root: File, direction: String): File? {
+        val named = File(root, "mt-$direction")
+        return if (isModelDir(named)) named else null
+    }
+
+    /** 目录里 5 个模型文件齐不齐。 */
+    fun isModelDir(dir: File): Boolean =
+        MODEL_FILES.all { name -> File(dir, name).let { it.isFile && it.length() > 0 } }
+
+    /**
+     * zip 里有没有 `mt-<direction>/` 前缀（读中央目录，不解压）。
+     *
+     * 用户从网盘随手下的包可能装反方向；先花几十毫秒对一下名字，比解压
+     * 237 MB 之后才发现好得多。包本身损坏时 ZipFile 会抛，交给调用方报错。
+     */
+    fun hasDirection(zip: File, direction: String): Boolean {
+        val prefix = "mt-$direction/"
+        java.util.zip.ZipFile(zip).use { zf ->
+            val entries = zf.entries()
+            while (entries.hasMoreElements()) {
+                if (entries.nextElement().name.startsWith(prefix)) return true
+            }
+        }
+        return false
     }
 
     /** 整文件 SHA-256（小写 hex）。154 MB 在手机上约 0.3–0.6 s。 */

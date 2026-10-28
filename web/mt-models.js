@@ -10,7 +10,7 @@
  * `mt.supported()` 为假时整块保持隐藏，不留一个点了没反应的按钮。
  */
 
-import { mt } from './native-translate.js?v=d95688901a';
+import { mt } from './native-translate.js?v=5038fb639a';
 
 const DIRECTIONS = {
   'zh-en': '中文 → 英文',
@@ -42,6 +42,15 @@ export function progressLabel(ev) {
     return `下载 ${formatMb(received)}`;
   }
   if (phase === 'verify') return '校验中…';
+  if (phase === 'copy') {
+    const received = Number(ev.received) || 0;
+    const total = Number(ev.total) || 0;
+    if (total > 0) {
+      const pct = Math.min(100, Math.round((received / total) * 100));
+      return `导入 ${pct}% · ${formatMb(received)} / ${formatMb(total)}`;
+    }
+    return `导入 ${formatMb(received)}`;
+  }
   if (phase === 'unzip') {
     const entries = Number(ev.entries) || 0;
     return entries > 0 ? `解压中 ${entries} 个文件` : '解压中…';
@@ -68,6 +77,9 @@ function renderIdle(entry, installed, bytes) {
   entry.action.disabled = installed;
   entry.action.textContent = installed ? '已安装' : '下载';
   entry.action.dataset.intent = installed ? '' : 'download';
+  // 装好了就不必再提"从文件导入"，免得每一行都挂三条文字。
+  entry.import.hidden = installed;
+  entry.import.disabled = false;
 }
 
 function renderBusy(entry, text) {
@@ -77,6 +89,7 @@ function renderBusy(entry, text) {
   entry.action.disabled = false;
   entry.action.textContent = '取消';
   entry.action.dataset.intent = 'cancel';
+  entry.import.hidden = true;
 }
 
 function renderFailed(entry, message) {
@@ -89,6 +102,9 @@ function renderFailed(entry, message) {
   entry.action.disabled = false;
   entry.action.textContent = '重试';
   entry.action.dataset.intent = 'download';
+  // 网络这条路失败时，本地导入往往就是解药——把入口留着。
+  entry.import.hidden = false;
+  entry.import.disabled = false;
 }
 
 export async function initMtModels() {
@@ -108,12 +124,14 @@ export async function initMtModels() {
       row,
       state: row.querySelector('[data-role="state"]'),
       action: row.querySelector('[data-role="action"]'),
+      import: row.querySelector('[data-role="import"]'),
       bar: row.querySelector('[data-role="bar"]'),
       fill: row.querySelector('[data-role="bar"] i'),
       busy: false,
       pending: false,
     };
     entry.action.addEventListener('click', () => onAction(direction));
+    entry.import.addEventListener('click', () => onImport(direction));
     rows.set(direction, entry);
   });
 
@@ -188,6 +206,32 @@ export async function initMtModels() {
     } catch (error) {
       const message = String((error && error.message) || error || '下载失败').replace(
         /^翻译模型安装失败：/,
+        '',
+      );
+      renderFailed(entry, message);
+    }
+  }
+
+  /** 本地导入：选文件 → 原生复制/解压，成功后同样要把下拉叫出来。 */
+  async function onImport(direction) {
+    const entry = rows.get(direction);
+    if (!entry || entry.pending) return;
+    entry.pending = true;
+    renderBusy(entry, '请选择模型包…');
+    entry.bar.hidden = true;
+    try {
+      const res = await mt.importZip(direction);
+      entry.pending = false;
+      if (res && res.cancelled) {
+        await refresh();
+        return;
+      }
+      await refresh();
+      await syncTranslate();
+    } catch (error) {
+      entry.pending = false;
+      const message = String((error && error.message) || error || '导入失败').replace(
+        /^翻译模型(安装|导入)失败：/,
         '',
       );
       renderFailed(entry, message);

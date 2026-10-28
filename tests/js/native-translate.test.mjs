@@ -106,3 +106,14 @@ test('进度回调里抛异常不会打断原生事件流', async () => {
   });
   assert.doesNotThrow(() => listener({ direction: 'zh-en', phase: 'unzip', entries: 2 }));
 });
+
+test('importZip 把方向交给原生；插件缺席时明确报错', async () => {
+  let seen = null;
+  installPlugin({ importModel: async (args) => { seen = args; return { ok: true, bytes: 1 }; } });
+  const res = await mt.importZip('zh-en');
+  assert.deepEqual(seen, { direction: 'zh-en' });
+  assert.equal(res.ok, true);
+
+  installPlugin(null);
+  await assert.rejects(() => mt.importZip('zh-en'), /不支持/);
+});

@@ -130,4 +130,35 @@ class MtArchiveTest {
         )
         assertNotNull(MtArchive.parseSha256(MtArchive.sha256(file)))
     }
+
+    @Test
+    fun detectsDirectionInsideZipWithoutExtracting() {
+        val zip = modelZip("zh-en")
+        assertTrue(MtArchive.hasDirection(zip, "zh-en"))
+        assertFalse(MtArchive.hasDirection(zip, "en-zh"))
+
+        // 不是 zip 的文件：读中央目录就会抛，调用方据此报"包无法读取"
+        val broken = File.createTempFile("echonote-broken", ".zip")
+        broken.writeText("not a zip at all")
+        try {
+            MtArchive.hasDirection(broken, "zh-en")
+            throw AssertionError("坏包应当抛异常")
+        } catch (expected: java.util.zip.ZipException) {
+            // 正常路径
+        }
+    }
+
+    @Test
+    fun strictDirectionDirRejectsWrongDirection() {
+        val root = tempDir()
+        val wrong = File(root, "mt-en-zh")
+        wrong.mkdirs()
+        for (name in MtArchive.MODEL_FILES) File(wrong, name).writeText("x")
+
+        // 松散查找能"找到"（任何装好的子目录），严格查找必须拒绝：
+        // 导入别人的包时，方向错了会把英文模型装进中文槽位。
+        assertNotNull(MtArchive.findModelDir(root, "zh-en"))
+        assertNull(MtArchive.directionDir(root, "zh-en"))
+        assertEquals(wrong.canonicalPath, MtArchive.directionDir(root, "en-zh")?.canonicalPath)
+    }
 }

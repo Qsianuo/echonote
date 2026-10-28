@@ -604,6 +604,29 @@ select {
   line-height: 1.45;
 }
 
+/* 「从文件导入」是次选路径：文字按钮，不跟主按钮抢注意力。 */
+.mt-import {
+  align-self: flex-start;
+  margin-top: 1px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-dim);
+  font-size: 10.5px;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+.mt-import:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.mt-import:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .mt-bar {
   grid-column: 1 / -1;
   height: 4px;

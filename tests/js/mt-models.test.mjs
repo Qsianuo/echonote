@@ -50,3 +50,13 @@ test('progressRatio：只在 download 且有总量时给数，并夹在 0~1', ()
   assert.equal(progressRatio({ phase: 'unzip', received: 5, total: 10 }), null);
   assert.equal(progressRatio(null), null);
 });
+
+test('copy 阶段（本地导入）用「导入」而不是「下载」', () => {
+  assert.equal(
+    progressLabel({ phase: 'copy', received: 74 * MB, total: 148 * MB }),
+    '导入 50% · 74 MB / 148 MB',
+  );
+  assert.equal(progressLabel({ phase: 'copy', received: 3 * MB }), '导入 3 MB');
+  // 复制阶段不该画进度条：它是本地 IO，秒级完成，抖动无意义
+  assert.equal(progressRatio({ phase: 'copy', received: 74, total: 148 }), null);
+});

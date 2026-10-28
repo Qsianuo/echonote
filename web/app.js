@@ -2834,7 +2834,6 @@
     boot();
   }
 })();
-
 /* 空状态大按钮只做转发：事件源仍是 #record-btn，不复制状态机。 */
 document.getElementById("empty-state")?.addEventListener("click", (e) => {
   if (e.target.closest(".empty-cta")) document.getElementById("record-btn").click();

@@ -22,11 +22,11 @@
 > **延迟取决于硬件**（本机实测首字 2.8 s、停顿后 1 s 出定稿，见下文口径）；
 > **首次准备要下载模型**（桌面双档 / 手机约 270 MB），之后可完全断网运行。
 
-🎬 **30 秒宣传片**（边说边出字 · 四种导出 · 隐私承诺）：
+🎬 **宣传片节选（11 秒）**：边说边出字 · 四种导出 · 隐私承诺
 
-![EchoNote 宣传片](docs/promo/echonote-promo.gif)
+![EchoNote 宣传片节选](docs/promo/echonote-promo.gif)
 
-▶️ [观看高清版视频（MP4 1080p，带解说音轨）](docs/promo/echonote-promo-30s.mp4) · [Releases 页下载](https://github.com/Qsianuo/echonote/releases/latest)
+▶️ [观看完整版（MP4 1080p，30 秒，带解说音轨）](docs/promo/echonote-promo-30s.mp4) · [Releases 页下载](https://github.com/Qsianuo/echonote/releases/latest)
 
 ---
 

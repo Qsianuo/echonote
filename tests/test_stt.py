@@ -526,14 +526,6 @@ def test_the_model_choice_survives_a_restart(tmp_path, monkeypatch):
     assert config._sticky_choice() is None
 
 
-def test_the_model_choice_survives_a_restart(tmp_path, monkeypatch):
-    """The dropdown used to forget the choice, so picking 75 MB looked broken."""
-    monkeypatch.setattr(config, "MODEL_DIR", str(tmp_path))
-    assert config._sticky_choice() is None
-    config.remember_model("tiny")
-    assert config._sticky_choice() == "tiny"
-    config.remember_model(None)
-    assert config._sticky_choice() is None
 
 
 def test_the_glossary_file_is_read_when_the_env_var_is_absent(tmp_path, monkeypatch):
@@ -546,6 +538,10 @@ def test_the_glossary_file_is_read_when_the_env_var_is_absent(tmp_path, monkeypa
     monkeypatch.setattr(config, "HOTWORDS", None)
     assert config._glossary_file() == "焦距 光圈 曝光"
     monkeypatch.setattr(config, "HOTWORDS", config._glossary_file())
+    # 这条用例要验的是"没有模型时返回空串"，不是引擎状态；显式清一遍，
+    # 免得别的用例把假模型留在模块变量里，让断言变成一句空话。
+    monkeypatch.setattr(stt, "_model", None)
+    monkeypatch.setattr(stt, "_live_model", None)
     assert stt.transcribe_live(np.zeros(16000, dtype=np.float32), "zh") == ""
 
 

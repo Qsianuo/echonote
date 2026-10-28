@@ -55,6 +55,10 @@ _auto_retries = 0
 _last_failure_at = 0.0
 _scheduler_started = False
 _shutdown = threading.Event()
+# 调度线程与它启动时用的那个 Event 都要留住：线程可能比一次测试活得久，
+# 只 set 模块变量拦不住它——它等到的是自己手里那个对象（见 _retry_scheduler）。
+_scheduler_thread: threading.Thread | None = None
+_scheduler_stop: threading.Event | None = None
 # Bumped on every switch so an in-flight load cannot overwrite a newer choice.
 _generation = 0
 _loaded_key: str | None = None
@@ -585,9 +589,16 @@ def maybe_auto_retry() -> bool:
     return True
 
 
-def _retry_scheduler() -> None:
-    """Background loop that calls :func:`maybe_auto_retry` every second."""
-    while not _shutdown.wait(1.0):
+def _retry_scheduler(stop: threading.Event | None = None) -> None:
+    """Background loop that calls :func:`maybe_auto_retry` every second.
+
+    [stop] 是线程启动那一刻的停机事件，必须由调用方传进来、由线程持有：
+    早先这里直接读模块变量 ``_shutdown``，测试把变量换成新 Event 之后，老线程
+    下一轮读到的就是新对象，永远等不到 set —— 它会在后续用例里继续调 load()，
+    把上一条用例的假模型写回模块状态。py3.11 的 CI 就是这么随机挂掉的。
+    """
+    stop = stop or _shutdown
+    while not stop.wait(1.0):
         try:
             maybe_auto_retry()
         except Exception:  # pragma: no cover - the scheduler must never die
@@ -596,18 +607,35 @@ def _retry_scheduler() -> None:
 
 def preload() -> None:
     """Warm up the model in the background at server startup."""
-    global _scheduler_started, _pending_loads
+    global _scheduler_started, _pending_loads, _scheduler_thread, _scheduler_stop
 
     _pending_loads += 1
     threading.Thread(target=_load_tracked, name="whisper-preload", daemon=True).start()
 
     if not _scheduler_started:
         _scheduler_started = True
-        threading.Thread(target=_retry_scheduler, name="whisper-retry-loop", daemon=True).start()
+        _scheduler_stop = _shutdown
+        _scheduler_thread = threading.Thread(
+            target=_retry_scheduler,
+            args=(_scheduler_stop,),
+            name="whisper-retry-loop",
+            daemon=True,
+        )
+        _scheduler_thread.start()
 
 
 def shutdown() -> None:
+    """Ask background workers to stop and wait (bounded) for the retry loop.
+
+    不 join 的话，调用方会以为已经停了，而循环还可能在下一 tick 里改引擎状态；
+    进程退出时 daemon 线程被硬杀，测试里则会跨用例污染。
+    """
     _shutdown.set()
+    if _scheduler_stop is not None:
+        _scheduler_stop.set()
+    thread = _scheduler_thread
+    if thread is not None and thread.is_alive() and thread is not threading.current_thread():
+        thread.join(timeout=2.0)
 
 
 def is_ready() -> bool:

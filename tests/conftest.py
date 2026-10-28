@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -49,3 +50,38 @@ def feed(segmenter, audio: np.ndarray) -> list[dict]:
 @pytest.fixture()
 def sample_wav() -> Path:
     return ROOT / "tests" / "sample.wav"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_stt_engine():
+    """每条用例前后都把 stt 的进程级引擎状态复位。
+
+    这些全局变量在真机上本就该活到进程结束，但测试之间会互相污染：
+    ``preload()`` 起的 ``whisper-retry-loop`` 是后台线程，若只把 ``_shutdown``
+    换成新 Event 而不 join，老线程会一直跑下去，在后续用例里调 ``load()``，
+    把上一条用例装的假模型写回 ``_model`` —— 表现为一条毫不相干的用例随机
+    报 ``'WhisperModel' object has no attribute 'transcribe'``（GitHub Actions
+    run 40648497208，py3.11 独有）。
+    """
+    from app import stt
+
+    def reset() -> None:
+        stt.shutdown()  # 有 join，最多等 2 s；旧线程必须先死，才能换 Event
+        stt._model = None
+        stt._live_model = None
+        stt._error = None
+        stt._loading = False
+        stt._pending_loads = 0
+        stt._attempts = 0
+        stt._auto_retries = 0
+        stt._last_failure_at = 0.0
+        stt._scheduler_started = False
+        stt._scheduler_thread = None
+        stt._scheduler_stop = None
+        stt._shutdown = threading.Event()
+        stt._ready.clear()
+        stt._live_ready.clear()
+
+    reset()
+    yield
+    reset()

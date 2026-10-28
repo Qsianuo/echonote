@@ -270,7 +270,9 @@ select {
   margin: var(--sp-2) auto 0;
   padding: 0 var(--sp-5) var(--sp-6);
   display: grid;
-  grid-template-columns: 370px minmax(0, 1fr);
+  /* P0-2：一主一次。转写区拿 1fr（1132 容器内约 792px ≈ 70%），
+     控制区固定成 320 的辅助轨。 */
+  grid-template-columns: minmax(0, 1fr) 320px;
   gap: var(--sp-4);
   align-items: stretch;
 }
@@ -433,6 +435,31 @@ select {
   display: block;
 }
 
+/* P0-2：录音进行中把控制区压成一条工具条——屏幕让给文字。
+   :has() 是本项目既有能力（.alerts 已在用），不引入 JS 状态类。 */
+.control-panel:has(.record-btn.recording) .settings,
+.control-panel:has(.record-btn.recording) #waveform {
+  display: none;
+}
+
+.control-panel:has(.record-btn.recording) .recorder {
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
+}
+
+.control-panel:has(.record-btn.recording) .record-btn {
+  width: 68px;
+  height: 68px;
+}
+
+.control-panel:has(.record-btn.recording) .timer {
+  font-size: var(--fs-5);
+}
+
 .record-btn.recording::after {
   content: "";
   position: absolute;
@@ -487,6 +514,51 @@ select {
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
+}
+
+/* P0-2：设置折叠区。默认收起——首屏只留「按下开始」这一件事，
+   下拉与模型说明退到一层之后，但一个都没删。 */
+.settings-fold > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) 0;
+  cursor: pointer;
+  list-style: none;
+  font-size: var(--fs-2);
+  color: var(--muted);
+  letter-spacing: 0.06em;
+}
+
+.settings-fold > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* 折叠指示用一条 1px 边，不用图标库、不用发光 */
+.settings-fold > summary::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin-left: auto;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform 0.18s;
+}
+
+.settings-fold[open] > summary {
+  color: var(--text);
+}
+
+.settings-fold[open] > summary::after {
+  transform: rotate(-135deg) translateY(-2px);
+}
+
+.settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0 var(--sp-2);
 }
 
 .field {
@@ -756,7 +828,7 @@ select {
   display: flex;
   flex-direction: column;
   min-height: 560px;
-  max-height: calc(100vh - 190px);
+  max-height: calc(100dvh - 190px);
 }
 
 .actions {
@@ -832,6 +904,7 @@ select {
 .transcript {
   flex: 1;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: var(--sp-2) var(--sp-5) var(--sp-4);
   scrollbar-width: thin;
   scrollbar-color: rgba(100, 255, 218, 0.2) transparent;
@@ -879,6 +952,33 @@ select {
 .empty span {
   font-size: var(--fs-1);
   color: var(--muted);
+}
+
+/* P0-2：空状态从「说明文字」改成「一个能按的大按钮」。
+   视觉尺寸即触控尺寸，不用 ::before 外扩。 */
+.empty-cta {
+  margin-top: var(--sp-2);
+  min-height: 44px;
+  padding: var(--sp-3) var(--sp-5);
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border-strong);
+  background: rgba(100, 255, 218, 0.1);
+  color: var(--accent);
+  font-family: inherit;
+  font-size: var(--fs-3);
+  cursor: pointer;
+  transition: background 0.18s, border-color 0.18s, transform 0.18s;
+}
+
+.empty-cta:hover:not(:disabled) {
+  background: rgba(100, 255, 218, 0.16);
+  transform: translateY(-1px);
+}
+
+/* 模型没就绪时大键是禁用的，空状态按钮跟着不可点——避免"点了没反应" */
+.layout:has(#record-btn:disabled) .empty-cta {
+  opacity: 0.45;
+  pointer-events: none;
 }
 
 .finals {
@@ -950,7 +1050,7 @@ select {
 .segment p {
   margin: 0;
   font-size: var(--fs-3);
-  line-height: 1.75;
+  line-height: 1.7;
   color: var(--text);
   word-break: break-word;
 }
@@ -1191,70 +1291,6 @@ dialog p b {
 
 /* ─────────────────────────── responsive ─────────────────────────── */
 
-@media (max-width: 940px) {
-  .layout {
-    grid-template-columns: 1fr;
-  }
-
-  .transcript-panel {
-    min-height: 440px;
-    max-height: 62vh;
-  }
-
-  .topbar {
-    padding-top: 20px;
-  }
-
-  .top-status {
-    width: 100%;
-    justify-content: flex-start;
-  }
-}
-
-@media (max-width: 520px) {
-  .layout,
-  .topbar,
-  .page-foot {
-    padding-left: 14px;
-    padding-right: 14px;
-  }
-
-  .record-btn {
-    width: 92px;
-    height: 92px;
-  }
-
-  .timer {
-    font-size: var(--fs-5);
-  }
-
-  .panel-head {
-    padding: var(--sp-4) var(--sp-4) var(--sp-3);
-    flex-wrap: wrap;
-  }
-
-  .transcript {
-    padding: var(--sp-2) var(--sp-4) var(--sp-4);
-  }
-
-  .alerts {
-    padding: 0 var(--sp-4);
-  }
-
-  .segment {
-    gap: var(--sp-3);
-  }
-
-  .playbar {
-    padding: var(--sp-3) var(--sp-4);
-    gap: var(--sp-3);
-  }
-
-  .play-time {
-    font-size: var(--fs-1);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -1265,66 +1301,6 @@ dialog p b {
   }
 }
 
-/* ───────────── 手机（窄幅）：转写区必须进首屏 ─────────────
-   桌面布局里控制面板（录音键 + 波形 + 设置 + 说明文案）把转写区推到了
-   首屏之外，手机上要滑半屏才能看到文字——手机实测反馈的第一条。
-   方案：砍掉对手机端无操作意义的说明文案、收间距、缩录音键，
-   转写区抬高并放开高度上限。 */
-@media (max-width: 720px) {
-  .topbar {
-    padding-top: 10px;
-    padding-bottom: 8px;
-  }
-
-  .recorder {
-    padding: var(--sp-3) var(--sp-3) var(--sp-1);
-    gap: var(--sp-2);
-  }
-
-  .recorder-controls {
-    gap: var(--sp-3);
-  }
-
-  .record-btn {
-    width: 82px;
-    height: 82px;
-  }
-
-  .pause-btn {
-    height: 40px;
-    padding: 0 var(--sp-3);
-    font-size: var(--fs-2);
-  }
-
-  .timer {
-    font-size: var(--fs-5);
-  }
-
-  .hint {
-    font-size: var(--fs-1);
-  }
-
-  #waveform {
-    height: 48px;
-  }
-
-  /* 模型准备说明、隐私说明：识别跑在电脑上，这些文案对手机端只有
-     高度成本，没有操作意义。 */
-  .local-note,
-  .model-notice,
-  .speed-notice {
-    display: none;
-  }
-
-  .control-panel .panel-head {
-    padding: var(--sp-3) var(--sp-4) var(--sp-2);
-  }
-
-  .transcript-panel {
-    min-height: 55vh;
-    max-height: none;
-  }
-}
 
 /* ───────────────────────── 开机画面 ─────────────────────────
    品牌底 + 声波 logo 呼吸 + 版本号；模型就绪淡出（首启模型下载时主动

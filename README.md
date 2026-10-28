@@ -8,7 +8,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![ASR](https://img.shields.io/badge/ASR-SenseVoice%20%7C%20zipformer%20%7C%20Whisper-412991?style=flat-square)](#-引擎与基准)
 [![License](https://img.shields.io/badge/License-MIT-64ffda?style=flat-square)](LICENSE)
-[![Release](https://img.shields.io/badge/release-v1.0.2-64ffda?style=flat-square)](#-快速开始)
+[![Release](https://img.shields.io/badge/release-v1.0.3-64ffda?style=flat-square)](#-快速开始)
 [![Android](https://img.shields.io/badge/Android-App%20Ready-3DDC84?style=flat-square&logo=android&logoColor=white)](mobile/README.md)
 
 边说边出字 · 录音不上传 · 装好模型后完全离线 · 支持中英日韩等多语言
@@ -17,7 +17,7 @@
 
 ---
 
-> **v1.0.2**：桌面版（Windows 便携包 / 源码）与 **Android App**（Capacitor + 原生
+> **v1.0.3**：桌面版（Windows 便携包 / 源码）与 **Android App**（Capacitor + 原生
 > sherpa-onnx，离线识别）双端形态，iOS 工程已就绪。老规矩三件事：**实验性**；
 > **延迟取决于硬件**（本机实测首字 2.8 s、停顿后 1 s 出定稿，见下文口径）；
 > **首次准备要下载模型**（桌面双档 / 手机约 270 MB），之后可完全断网运行。
@@ -26,7 +26,7 @@
 
 ![EchoNote 宣传片](docs/promo/echonote-promo.gif)
 
-▶️ [观看高清版视频（MP4，点开即播）](docs/promo/echonote-promo.mp4) · [Releases 页下载](https://github.com/Qsianuo/echonote/releases/latest)
+▶️ [观看高清版视频（MP4 1080p，带解说音轨）](docs/promo/echonote-promo-30s.mp4) · [Releases 页下载](https://github.com/Qsianuo/echonote/releases/latest)
 
 ---
 
@@ -62,13 +62,14 @@
 ```mermaid
 flowchart LR
     subgraph B["浏览器"]
-        MIC[麦克风] --> W["采集 Worklet（高通·陷波·AGC·重采样）"]
-        W -->|16kHz PCM 帧| UI[界面 / 波形 / 导出]
+        MIC["麦克风"] --> W["采集 Worklet（高通·陷波·AGC·重采样）"]
+        W -->|16kHz PCM 帧| UI["界面 / 波形 / 导出"]
     end
-    W -->|WebSocket| subgraph S["Python 服务（127.0.0.1:8000）"]
+    subgraph S["Python 服务（127.0.0.1:8000）"]
         VAD["VAD 切句（自适应门限 / 情境预设）"] --> LIVE["实时字幕（zipformer 流式）"]
         VAD --> FIN["定稿 + 精修（SenseVoice / Whisper / 远程）"]
     end
+    W -->|WebSocket| VAD
     LIVE -->|partial| UI
     FIN -->|final / refine| UI
 ```

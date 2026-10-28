@@ -43,6 +43,10 @@ gradlew.bat assembleDebug
 
 改了 web/ 后先 `cd mobile && npx cap sync android` 再构建。
 
+正式包用 `assembleRelease`，产物只有 `app-release.apk`。**AAB 自 2026-10-28 起停发**
+（不上架 Google Play，AAB 对侧载与国内商店无用）；真要上架时临时执行
+`gradlew.bat bundleRelease`，构建配置未做任何删改。
+
 ## 安卓构建说明
 
 构建链已在本机落地（无需 Android Studio，纯命令行）：

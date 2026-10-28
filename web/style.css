@@ -758,6 +758,14 @@ select {
   background: rgba(255, 84, 112, 0.1);
   border: 1px solid rgba(255, 84, 112, 0.35);
 }
+/* flex 子项默认 min-width:auto，错误串里只要有不可断的长 token
+   （实测「模型加载失败：(MaxRetriesExceeded…)」宽 408px），就会把整个
+   控制面板撑到 462px，手机上出现横向滚动条。任意字符处都允许断行。 */
+.alert > span,
+.notice > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 
 .notice {
   color: #ffe0a3;
@@ -1345,7 +1353,10 @@ dialog p b {
   .menu button,
   .gh-link,
   .empty-cta,
-  .settings-fold > summary {
+  .settings-fold > summary,
+  /* 下拉框靠 padding + 字号撑到 42px，离 44 差 2px；实测 390 宽下 3 个 select
+     都是 356×42，补在这里而不是全局，避免桌面端下拉被无端拉高。 */
+  .field select {
     min-height: 44px;
     min-width: 44px;
   }

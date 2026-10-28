@@ -10,7 +10,7 @@
  * `mt.supported()` 为假时整块保持隐藏，不留一个点了没反应的按钮。
  */
 
-import { mt } from './native-translate.js?v=f6af659dcb';
+import { mt } from './native-translate.js?v=ad355fbcb3';
 
 const DIRECTIONS = {
   'zh-en': '中文 → 英文',

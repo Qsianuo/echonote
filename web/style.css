@@ -1291,6 +1291,256 @@ dialog p b {
 
 /* ─────────────────────────── responsive ─────────────────────────── */
 
+/* ─────────────────────────── 响应式 ───────────────────────────
+   v1.17：三档断点按 520 → 720 → 940 升序连续排列，且用不重叠的区间查询，
+   每条规则只在自己的宽度带内命中——结果不再由源码先后决定。
+   v1.16 的 720 块落在 prefers-reduced-motion 之后，覆盖关系靠运气。
+   两个窄屏档各自写一遍底部工具条结构：区间不重叠，共用一套就要重叠查询，
+   那是把今天的坑换个位置。 */
+
+/* ── 档 1 · 手机 ≤520：转写在上面占满高度，控制区落到底部工具条 ── */
+@media (max-width: 520px) {
+  .topbar {
+    padding: var(--sp-3) var(--sp-4);
+  }
+
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 0 var(--sp-4) calc(var(--sp-6) + 104px);
+  }
+
+  .transcript-panel {
+    min-height: calc(100dvh - 264px);
+    max-height: none;
+  }
+
+  .control-panel {
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 30;
+    max-height: 72dvh;
+    overflow-y: auto;
+    border-radius: var(--r-float) var(--r-float) 0 0;
+    padding-bottom: calc(var(--sp-3) + env(safe-area-inset-bottom));
+  }
+
+  .control-panel .panel-head {
+    display: none;
+  }
+
+  .recorder {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: var(--sp-4) var(--sp-4) var(--sp-2);
+  }
+
+  .record-btn {
+    width: 84px;
+    height: 84px;
+  }
+
+  .pause-btn {
+    height: 44px;
+  }
+
+  .timer {
+    font-size: var(--fs-5);
+  }
+
+  #waveform {
+    display: none;
+  }
+
+  .settings {
+    padding: var(--sp-2) var(--sp-4) var(--sp-2);
+    margin-top: 0;
+  }
+
+  .settings-body {
+    max-height: 44dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  /* 触控目标：所有可点元素 ≥44×44（P0-3 验收项） */
+  .btn,
+  .pause-btn,
+  .play-toggle,
+  .menu button,
+  .gh-link,
+  .empty-cta,
+  .settings-fold > summary {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .play-seek {
+    height: 44px;
+    background: transparent;
+  }
+
+  .play-seek::-webkit-slider-runnable-track {
+    height: 4px;
+    background: rgba(100, 255, 218, 0.16);
+    border-radius: var(--r-pill);
+  }
+
+  .play-seek::-moz-range-track {
+    height: 4px;
+    background: rgba(100, 255, 218, 0.16);
+    border-radius: var(--r-pill);
+  }
+
+  /* 文字按钮视觉尺寸不变，用 ::before 把交互区撑到 44 */
+  .mt-import {
+    position: relative;
+  }
+
+  .mt-import::before {
+    content: "";
+    position: absolute;
+    inset: -16px -8px;
+  }
+
+  .segment {
+    min-height: 44px;
+  }
+}
+
+/* ── 档 2 · 大屏手机 521–720：同一套底部工具条，尺寸松一档 ── */
+@media (min-width: 521px) and (max-width: 720px) {
+  .topbar {
+    padding: var(--sp-3) var(--sp-4);
+  }
+
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 0 var(--sp-4) calc(var(--sp-6) + 112px);
+  }
+
+  .transcript-panel {
+    min-height: calc(100dvh - 272px);
+    max-height: none;
+  }
+
+  .control-panel {
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 30;
+    max-height: 70dvh;
+    overflow-y: auto;
+    border-radius: var(--r-float) var(--r-float) 0 0;
+    padding-bottom: calc(var(--sp-3) + env(safe-area-inset-bottom));
+  }
+
+  .control-panel .panel-head {
+    display: none;
+  }
+
+  .recorder {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: var(--sp-4) var(--sp-5) var(--sp-2);
+  }
+
+  .record-btn {
+    width: 92px;
+    height: 92px;
+  }
+
+  .pause-btn {
+    height: 44px;
+  }
+
+  .timer {
+    font-size: var(--fs-5);
+  }
+
+  #waveform {
+    display: none;
+  }
+
+  .settings {
+    padding: var(--sp-2) var(--sp-5) var(--sp-2);
+    margin-top: 0;
+  }
+
+  .settings-body {
+    max-height: 44dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .btn,
+  .pause-btn,
+  .play-toggle,
+  .menu button,
+  .gh-link,
+  .empty-cta,
+  .settings-fold > summary {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .play-seek {
+    height: 44px;
+    background: transparent;
+  }
+
+  .play-seek::-webkit-slider-runnable-track {
+    height: 4px;
+    background: rgba(100, 255, 218, 0.16);
+    border-radius: var(--r-pill);
+  }
+
+  .play-seek::-moz-range-track {
+    height: 4px;
+    background: rgba(100, 255, 218, 0.16);
+    border-radius: var(--r-pill);
+  }
+
+  .mt-import {
+    position: relative;
+  }
+
+  .mt-import::before {
+    content: "";
+    position: absolute;
+    inset: -16px -8px;
+  }
+
+  .segment {
+    min-height: 44px;
+  }
+}
+
+/* ── 档 3 · 平板 721–940：转写区在上、控制区在下，都是流式 ── */
+@media (min-width: 721px) and (max-width: 940px) {
+  .topbar {
+    padding: var(--sp-4) var(--sp-5) var(--sp-3);
+  }
+
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .transcript-panel {
+    min-height: 440px;
+    max-height: calc(100dvh - 200px);
+  }
+
+  .top-status {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

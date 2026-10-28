@@ -7,7 +7,7 @@
   const PROTOCOL_VERSION = '4';
   // 静态资源版本号：与 index.html 里 style.css / app.js 的 ?v= 保持一致。
   // 改动前端文件时同步递增，浏览器才会重新拉取（worklet 模块同样受缓存）。
-  const ASSET_VERSION = "02c6f7957c";
+  const ASSET_VERSION = "3640110427";
   const RECONNECT_BASE_MS = 1500;
   const RECONNECT_MAX_MS = 15000;
   const RECONNECT_ATTEMPTS_CAP = 4;
@@ -2834,7 +2834,3 @@
     boot();
   }
 })();
-/* 空状态大按钮只做转发：事件源仍是 #record-btn，不复制状态机。 */
-document.getElementById("empty-state")?.addEventListener("click", (e) => {
-  if (e.target.closest(".empty-cta")) document.getElementById("record-btn").click();
-});

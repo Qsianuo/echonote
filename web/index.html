@@ -21,9 +21,12 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="apple-touch-icon" href="icon-512.png" />
-    <link rel="stylesheet" href="style.css?v=02c6f7957c" />
+    <link rel="stylesheet" href="style.css?v=3640110427" />
   </head>
   <body>
+    <div class="bg-grid" aria-hidden="true"></div>
+    <div class="bg-glow" aria-hidden="true"></div>
+
     <a class="skip-link" href="#transcript">跳到转写内容</a>
 
     <!-- 开机画面：紧跟 <body> 使其先于一切脚本绘制。淡出时机见 app.js
@@ -69,6 +72,118 @@
     </header>
 
     <main class="layout">
+      <!-- ───────────────────────── 录音控制 ───────────────────────── -->
+      <section class="panel control-panel" aria-labelledby="control-title">
+        <div class="panel-head">
+          <h2 id="control-title">录音控制</h2>
+          <span class="tag" id="model-tag">加载中</span>
+        </div>
+
+        <div class="recorder">
+          <div class="recorder-controls">
+            <button id="record-btn" class="record-btn" disabled aria-label="开始录音">
+              <svg class="icon-mic" viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+                <rect x="9" y="2.5" width="6" height="11" rx="3" />
+                <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7" />
+              </svg>
+              <svg class="icon-stop" viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true">
+                <rect x="6.5" y="6.5" width="11" height="11" rx="2.2" />
+              </svg>
+            </button>
+            <button id="pause-btn" class="pause-btn" disabled aria-label="暂停录音" title="暂停录音">
+              <svg class="icon-pause" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+                <rect x="7" y="5.5" width="3.4" height="13" rx="1.2" />
+                <rect x="13.6" y="5.5" width="3.4" height="13" rx="1.2" />
+              </svg>
+              <svg class="icon-play" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+                <path d="M8.5 5.5v13l10.5-6.5z" />
+              </svg>
+              <span class="pause-label">暂停</span>
+            </button>
+          </div>
+          <div class="timer" id="timer">00:00</div>
+          <div class="hint" id="hint">正在准备模型…</div>
+          <!-- 转写是否在成功：数字在涨就是在工作，不动就是没在收。 -->
+          <div class="hint" id="live-status" aria-live="polite"></div>
+        </div>
+
+        <canvas id="waveform" height="92" aria-hidden="true"></canvas>
+
+        <div class="settings">
+          <label class="field" for="language">
+            <span>识别语言</span>
+            <select id="language" disabled>
+              <option value="auto">自动识别</option>
+            </select>
+          </label>
+
+          <label class="field" for="translate-to" id="translate-field" hidden>
+            <span>译文语言</span>
+            <select id="translate-to" disabled>
+              <option value="">关闭</option>
+            </select>
+          </label>
+
+          <label class="field" for="mode-select">
+            <span>录入情境</span>
+            <select id="mode-select" disabled>
+              <option value="personal">个人模式 · 近讲低延迟</option>
+              <option value="meeting">会议模式 · 远场抗噪</option>
+            </select>
+          </label>
+
+          <!-- 离线翻译模型（仅原生壳）：154 MB/方向的包不随 APK 发布，
+               这里提供应用内下载。桌面/浏览器环境由 mt-models.js 判定后保持
+               hidden，永远不会出现一个点了没反应的按钮。 -->
+          <div class="mt-models" id="mt-models" hidden>
+            <div class="mt-head">
+              <span class="mt-title">离线翻译模型</span>
+              <span class="mt-meta" data-role="meta" id="mt-meta">每方向约 154 MB，建议 Wi-Fi 下载</span>
+            </div>
+            <div class="mt-row" data-direction="zh-en">
+              <div class="mt-info">
+                <span class="mt-name">中文 → 英文</span>
+                <span class="mt-state" data-role="state">检查中…</span>
+                <button class="mt-import" type="button" data-role="import" hidden>从文件导入</button>
+              </div>
+              <button class="btn tiny" type="button" data-role="action" disabled>下载</button>
+              <div class="mt-bar" data-role="bar" hidden><i></i></div>
+            </div>
+            <div class="mt-row" data-direction="en-zh">
+              <div class="mt-info">
+                <span class="mt-name">英文 → 中文</span>
+                <span class="mt-state" data-role="state">检查中…</span>
+                <button class="mt-import" type="button" data-role="import" hidden>从文件导入</button>
+              </div>
+              <button class="btn tiny" type="button" data-role="action" disabled>下载</button>
+              <div class="mt-bar" data-role="bar" hidden><i></i></div>
+            </div>
+          </div>
+
+          <label class="field" for="model-select" hidden>
+            <span>识别模型</span>
+            <select id="model-select" disabled></select>
+          </label>
+
+          <div class="local-note">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+              <rect x="4" y="10" width="16" height="10" rx="2" />
+              <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+            </svg>
+            <span id="local-note-text">录音与识别均在本机完成，不上传云端，音频只留在本机浏览器存储里</span>
+            <span class="offline-badge" id="offline-badge" hidden>离线可用</span>
+          </div>
+
+          <p class="model-notice" id="model-notice">
+            首次使用需准备模型：默认「快速」档约 464 MB，实时字幕另用约 145 MB 的「极速」档。
+            可取离线模型包放进 <code>models/</code>，或联网运行一次
+            <code>python tools/fetch_model.py</code>。之后断网也能用。
+          </p>
+
+          <p class="model-notice" id="speed-notice" hidden></p>
+        </div>
+      </section>
+
       <!-- ───────────────────────── 实时转写 ───────────────────────── -->
       <section class="panel transcript-panel" aria-labelledby="transcript-title">
         <div class="panel-head">
@@ -128,9 +243,8 @@
                 <path d="M4 10v4M8 6v12M12 3v18M16 7v10M20 10v4" />
               </svg>
             </div>
-            <p>还没开始。按下按钮，文字会实时落在这里</p>
-            <span>录音与识别都在本机完成 · 支持中英文混合识别</span>
-            <button class="empty-cta" type="button">开始录音</button>
+            <p>点击左侧麦克风开始录音</p>
+            <span>文字会实时出现在这里 · 支持中英文混合识别</span>
           </div>
           <ol id="finals" class="finals" aria-label="已完成的字幕"></ol>
           <div class="partial" id="partial" hidden>
@@ -162,125 +276,6 @@
           <span>模型 <b id="footer-model">medium</b><span id="footer-backend"> · 本地推理</span></span>
         </div>
       </section>
-      <!-- ───────────────────────── 录音控制 ───────────────────────── -->
-      <section class="panel control-panel" aria-labelledby="control-title">
-        <div class="panel-head">
-          <h2 id="control-title">录音控制</h2>
-          <span class="tag" id="model-tag">加载中</span>
-        </div>
-
-        <div class="recorder">
-          <div class="recorder-controls">
-            <button id="record-btn" class="record-btn" disabled aria-label="开始录音">
-              <svg class="icon-mic" viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
-                <rect x="9" y="2.5" width="6" height="11" rx="3" />
-                <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7" />
-              </svg>
-              <svg class="icon-stop" viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true">
-                <rect x="6.5" y="6.5" width="11" height="11" rx="2.2" />
-              </svg>
-            </button>
-            <button id="pause-btn" class="pause-btn" disabled aria-label="暂停录音" title="暂停录音">
-              <svg class="icon-pause" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
-                <rect x="7" y="5.5" width="3.4" height="13" rx="1.2" />
-                <rect x="13.6" y="5.5" width="3.4" height="13" rx="1.2" />
-              </svg>
-              <svg class="icon-play" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
-                <path d="M8.5 5.5v13l10.5-6.5z" />
-              </svg>
-              <span class="pause-label">暂停</span>
-            </button>
-          </div>
-          <div class="timer" id="timer">00:00</div>
-          <div class="hint" id="hint">准备中：就绪后按一下麦克风开始</div>
-          <!-- 转写是否在成功：数字在涨就是在工作，不动就是没在收。 -->
-          <div class="hint" id="live-status" aria-live="polite"></div>
-        </div>
-
-        <canvas id="waveform" height="92" aria-hidden="true"></canvas>
-
-        <div class="settings">
-          <!-- P0-2：录音键以外的次要项默认收起，首屏只留"按下去开始"。
-               P1-2：模型准备说明（含命令行块）也在这里，不进首屏。 -->
-          <details class="settings-fold">
-            <summary>设置 · 语言与模型</summary>
-            <div class="settings-body">
-              <label class="field" for="language">
-                <span>识别语言</span>
-                <select id="language" disabled>
-                  <option value="auto">自动识别</option>
-                </select>
-              </label>
-
-              <label class="field" for="translate-to" id="translate-field" hidden>
-                <span>译文语言</span>
-                <select id="translate-to" disabled>
-                  <option value="">关闭</option>
-                </select>
-              </label>
-
-              <label class="field" for="mode-select">
-                <span>录入情境</span>
-                <select id="mode-select" disabled>
-                  <option value="personal">个人模式 · 近讲低延迟</option>
-                  <option value="meeting">会议模式 · 远场抗噪</option>
-                </select>
-              </label>
-
-              <!-- 离线翻译模型（仅原生壳）：154 MB/方向的包不随 APK 发布，
-                   这里提供应用内下载。桌面/浏览器环境由 mt-models.js 判定后保持
-                   hidden，永远不会出现一个点了没反应的按钮。 -->
-              <div class="mt-models" id="mt-models" hidden>
-                <div class="mt-head">
-                  <span class="mt-title">离线翻译模型</span>
-                  <span class="mt-meta" data-role="meta" id="mt-meta">每方向约 154 MB，建议 Wi-Fi 下载</span>
-                </div>
-                <div class="mt-row" data-direction="zh-en">
-                  <div class="mt-info">
-                    <span class="mt-name">中文 → 英文</span>
-                    <span class="mt-state" data-role="state">检查中…</span>
-                    <button class="mt-import" type="button" data-role="import" hidden>从文件导入</button>
-                  </div>
-                  <button class="btn tiny" type="button" data-role="action" disabled>下载</button>
-                  <div class="mt-bar" data-role="bar" hidden><i></i></div>
-                </div>
-                <div class="mt-row" data-direction="en-zh">
-                  <div class="mt-info">
-                    <span class="mt-name">英文 → 中文</span>
-                    <span class="mt-state" data-role="state">检查中…</span>
-                    <button class="mt-import" type="button" data-role="import" hidden>从文件导入</button>
-                  </div>
-                  <button class="btn tiny" type="button" data-role="action" disabled>下载</button>
-                  <div class="mt-bar" data-role="bar" hidden><i></i></div>
-                </div>
-            </div>
-
-            <label class="field" for="model-select" hidden>
-              <span>识别模型</span>
-              <select id="model-select" disabled></select>
-            </label>
-
-            <div class="local-note">
-              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
-                <rect x="4" y="10" width="16" height="10" rx="2" />
-                <path d="M8 10V7a4 4 0 0 1 8 0v3" />
-              </svg>
-              <span id="local-note-text">录音与识别均在本机完成，不上传云端，音频只留在本机浏览器存储里</span>
-              <span class="offline-badge" id="offline-badge" hidden>离线可用</span>
-            </div>
-
-            <p class="model-notice" id="model-notice">
-              首次使用需准备模型：默认「快速」档约 464 MB，实时字幕另用约 145 MB 的「极速」档。
-              可取离线模型包放进 <code>models/</code>，或联网运行一次
-              <code>python tools/fetch_model.py</code>。之后断网也能用。
-            </p>
-
-            <p class="model-notice" id="speed-notice" hidden></p>
-            </div>
-          </details>
-        </div>
-      </section>
-
     </main>
 
     <footer class="page-foot">
@@ -319,9 +314,9 @@
          检测到 Capacitor 才拦截 fetch/WebSocket；桌面环境加载等于空操作。
          必须在 app.js 的 boot() 之前生效——所以 boot 挂在
          DOMContentLoaded 上。 -->
-    <script src="transport.js?v=02c6f7957c"></script>
-    <script type="module" src="native-boot.js?v=02c6f7957c"></script>
-    <script src="mt-repair.js?v=02c6f7957c"></script>
-    <script src="app.js?v=02c6f7957c"></script>
+    <script src="transport.js?v=3640110427"></script>
+    <script type="module" src="native-boot.js?v=3640110427"></script>
+    <script src="mt-repair.js?v=3640110427"></script>
+    <script src="app.js?v=3640110427"></script>
   </body>
 </html>

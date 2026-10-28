@@ -19,10 +19,11 @@
  * app.js 的 boot() 因此挂到 DOMContentLoaded，保证注册先于启动安装。
  */
 
-import { MobileEngine } from './native-engine.js?v=08f18022ac';
-import { MODES } from './native-vad.js?v=08f18022ac';
-import { sherpa } from './native-sherpa.js?v=08f18022ac';
-import { mt } from './native-translate.js';
+import { MobileEngine } from './native-engine.js?v=d95688901a';
+import { MODES } from './native-vad.js?v=d95688901a';
+import { sherpa } from './native-sherpa.js?v=d95688901a';
+import { mt } from './native-translate.js?v=d95688901a';
+import { initMtModels } from './mt-models.js?v=d95688901a';
 
 const isNative = typeof window !== 'undefined' && !!window.Capacitor;
 if (isNative) install();
@@ -352,4 +353,22 @@ function install() {
     },
     api,
   });
+
+  // -------------------------------------------- 离线翻译模型（设置页）
+  //
+  // 应用内下载装上模型后，探测缓存与「译文语言」下拉都要立刻更新，否则
+  // 用户得重启一次应用才看见新语种。
+  window.addEventListener('echonote:mt-installed', (event) => {
+    const targets = event && event.detail && event.detail.targets;
+    if (Array.isArray(targets)) mtTargets = targets;
+  });
+
+  // DOM 就绪后再初始化：它要找 #mt-models 与两个按钮。
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      initMtModels();
+    });
+  } else {
+    initMtModels();
+  }
 }

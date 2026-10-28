@@ -7,7 +7,7 @@
   const PROTOCOL_VERSION = '4';
   // 静态资源版本号：与 index.html 里 style.css / app.js 的 ?v= 保持一致。
   // 改动前端文件时同步递增，浏览器才会重新拉取（worklet 模块同样受缓存）。
-  const ASSET_VERSION = "08f18022ac";
+  const ASSET_VERSION = "d95688901a";
   const RECONNECT_BASE_MS = 1500;
   const RECONNECT_MAX_MS = 15000;
   const RECONNECT_ATTEMPTS_CAP = 4;
@@ -908,21 +908,7 @@
       // 译文语言：只有在真的装了翻译模型时才出现。没装就藏起来——
       // 一个永远翻不出东西的下拉，比没有这个下拉更糟。
       state.translateTargets = config.translate_targets || [];
-      if (el.translateTo && el.translateField) {
-        el.translateField.hidden = state.translateTargets.length === 0;
-        el.translateTo.textContent = '';
-        const off = document.createElement('option');
-        off.value = '';
-        off.textContent = '关闭';
-        el.translateTo.appendChild(off);
-        state.translateTargets.forEach((code) => {
-          const option = document.createElement('option');
-          option.value = code;
-          option.textContent = Expo.languageLabel(code, state.languages);
-          el.translateTo.appendChild(option);
-        });
-        el.translateTo.value = state.translateTo || '';
-      }
+      renderTranslateTargets();
 
       if (el.modeSelect) {
         el.modeSelect.value = config.mode || 'personal';
@@ -941,6 +927,36 @@
     } catch {
       /* defaults stay */
     }
+  }
+
+  /**
+   * 重建「译文语言」下拉。两处调用：拿到服务端 config 时，以及在设置页
+   * 装完翻译模型后（原生壳的 mt-models.js 走 window.EchoNote 这个入口）。
+   * 单独抽出来的原因是后一条路径——不抽的话装完模型必须重启应用才能选译文。
+   */
+  function renderTranslateTargets() {
+    if (!el.translateTo || !el.translateField) return;
+    el.translateField.hidden = state.translateTargets.length === 0;
+    el.translateTo.textContent = '';
+    const off = document.createElement('option');
+    off.value = '';
+    off.textContent = '关闭';
+    el.translateTo.appendChild(off);
+    state.translateTargets.forEach((code) => {
+      const option = document.createElement('option');
+      option.value = code;
+      option.textContent = Expo.languageLabel(code, state.languages);
+      el.translateTo.appendChild(option);
+    });
+    // 语种可能被删掉（换机器、清了数据）：保留一个已不存在的值会让
+    // sendConfig 一直上报一个引擎做不到的 translate_to。
+    const keep =
+      state.translateTo && state.translateTargets.includes(state.translateTo)
+        ? state.translateTo
+        : '';
+    state.translateTo = keep;
+    el.translateTo.value = keep;
+    el.translateTo.disabled = !state.modelReady;
   }
 
   /* ───────────────────────── model selection ───────────────────────── */
@@ -2798,6 +2814,16 @@
     connect();
     pollStatus();
   }
+
+  // 设置页的「离线翻译模型」装完一个方向后，要让「译文语言」立刻出现。
+  // 只暴露这一个入口，不把内部 state 整体抛出去；桌面环境没有任何调用者。
+  window.EchoNote = window.EchoNote || {};
+  window.EchoNote.refreshTranslateTargets = (targets) => {
+    if (Array.isArray(targets)) {
+      state.translateTargets = targets.filter((code) => typeof code === 'string' && code);
+    }
+    renderTranslateTargets();
+  };
 
   // 原生壳（Capacitor）的适配模块是 <script type=module>，在整页解析完
   // 之后、DOMContentLoaded 之前执行；这里把启动挂到 DOMContentLoaded，

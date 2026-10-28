@@ -21,7 +21,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="apple-touch-icon" href="icon-512.png" />
-    <link rel="stylesheet" href="style.css?v=08f18022ac" />
+    <link rel="stylesheet" href="style.css?v=d95688901a" />
   </head>
   <body>
     <div class="bg-grid" aria-hidden="true"></div>
@@ -131,6 +131,32 @@
               <option value="meeting">会议模式 · 远场抗噪</option>
             </select>
           </label>
+
+          <!-- 离线翻译模型（仅原生壳）：154 MB/方向的包不随 APK 发布，
+               这里提供应用内下载。桌面/浏览器环境由 mt-models.js 判定后保持
+               hidden，永远不会出现一个点了没反应的按钮。 -->
+          <div class="mt-models" id="mt-models" hidden>
+            <div class="mt-head">
+              <span class="mt-title">离线翻译模型</span>
+              <span class="mt-meta" data-role="meta" id="mt-meta">每方向约 154 MB，建议 Wi-Fi 下载</span>
+            </div>
+            <div class="mt-row" data-direction="zh-en">
+              <div class="mt-info">
+                <span class="mt-name">中文 → 英文</span>
+                <span class="mt-state" data-role="state">检查中…</span>
+              </div>
+              <button class="btn tiny" type="button" data-role="action" disabled>下载</button>
+              <div class="mt-bar" data-role="bar" hidden><i></i></div>
+            </div>
+            <div class="mt-row" data-direction="en-zh">
+              <div class="mt-info">
+                <span class="mt-name">英文 → 中文</span>
+                <span class="mt-state" data-role="state">检查中…</span>
+              </div>
+              <button class="btn tiny" type="button" data-role="action" disabled>下载</button>
+              <div class="mt-bar" data-role="bar" hidden><i></i></div>
+            </div>
+          </div>
 
           <label class="field" for="model-select" hidden>
             <span>识别模型</span>
@@ -286,9 +312,9 @@
          检测到 Capacitor 才拦截 fetch/WebSocket；桌面环境加载等于空操作。
          必须在 app.js 的 boot() 之前生效——所以 boot 挂在
          DOMContentLoaded 上。 -->
-    <script src="transport.js?v=08f18022ac"></script>
-    <script type="module" src="native-boot.js?v=08f18022ac"></script>
-    <script src="mt-repair.js?v=08f18022ac"></script>
-    <script src="app.js?v=08f18022ac"></script>
+    <script src="transport.js?v=d95688901a"></script>
+    <script type="module" src="native-boot.js?v=d95688901a"></script>
+    <script src="mt-repair.js?v=d95688901a"></script>
+    <script src="app.js?v=d95688901a"></script>
   </body>
 </html>

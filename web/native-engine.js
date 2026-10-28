@@ -13,9 +13,9 @@
  */
 
 import { correct as fixTerms, applyFixes } from './glossary.js';
-import { Segmenter, MODES } from './native-vad.js?v=08f18022ac';
-import { sherpa } from './native-sherpa.js?v=08f18022ac';
-import { mt } from './native-translate.js?v=08f18022ac';
+import { Segmenter, MODES } from './native-vad.js?v=d95688901a';
+import { sherpa } from './native-sherpa.js?v=d95688901a';
+import { mt } from './native-translate.js?v=d95688901a';
 
 const LIVE_STEP_S = 0.6;
 const MIN_FIRST_DECODE_S = 2.0;

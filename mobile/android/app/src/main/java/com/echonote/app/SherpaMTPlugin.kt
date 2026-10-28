@@ -10,6 +10,9 @@ import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
 import java.io.File
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.nio.FloatBuffer
 import java.nio.LongBuffer
 import java.util.concurrent.ConcurrentHashMap
@@ -90,10 +93,317 @@ class SherpaMTPlugin : Plugin() {
         }
     }
 
+    // ------------------------------------------------------------------
+    // 模型安装（应用内下载，2026-10-28）
+    // ------------------------------------------------------------------
+
+    /** 下载/解压线程：与推理线程分开，237 MB 的解压不能卡住正在翻的句子。 */
+    private val installer = Executors.newSingleThreadExecutor()
+
+    /** 同一时刻只允许一个方向在装：两路 148 MB 会互相抢带宽与存储。 */
+    @Volatile
+    private var installing: String? = null
+
+    /** 取消标志，只在当前任务内有效。 */
+    @Volatile
+    private var cancelRequested = false
+
+    /**
+     * 两个方向的安装状态。界面据此决定按钮是「下载」还是「已安装」，
+     * 也据此算还要腾多少空间（freeBytes 是安装位置的可用空间）。
+     */
+    @PluginMethod
+    fun modelStatus(call: PluginCall) {
+        val root = modelRoot(call)
+        val items = JSArray()
+        for (direction in TARGET_BY_DIRECTION.keys) {
+            val installedDir = resolveDirectionDir(root, direction)
+            val obj = JSObject()
+            obj.put("direction", direction)
+            obj.put("target", TARGET_BY_DIRECTION[direction])
+            obj.put("installed", installedDir != null)
+            obj.put("bytes", installedDir?.let { dirBytes(it) } ?: 0L)
+            obj.put("path", installedDir?.absolutePath ?: "")
+            items.put(obj)
+        }
+        val ret = JSObject()
+        ret.put("items", items)
+        ret.put("freeBytes", writableRoot(call.getString("root")).usableSpace)
+        ret.put("installing", installing ?: "")
+        call.resolve(ret)
+    }
+
+    /**
+     * 下载并安装一个方向。异步执行（148 MB 下载 + 237 MB 解压），过程中用
+     * `mtProgress` 事件推进度；完成后 resolve 一次。
+     */
+    @PluginMethod
+    fun downloadModel(call: PluginCall) {
+        val direction = call.getString("direction") ?: return call.reject("缺少 direction")
+        if (!TARGET_BY_DIRECTION.containsKey(direction)) return call.reject("未知方向 $direction")
+        if (installing != null) return call.reject("另一个方向的模型正在安装，请稍候")
+
+        val givenRoot = call.getString("root")
+        installing = direction
+        cancelRequested = false
+        installer.execute {
+            try {
+                call.resolve(install(direction, givenRoot))
+            } catch (e: InstallCancelled) {
+                val ret = JSObject()
+                ret.put("ok", false)
+                ret.put("cancelled", true)
+                call.resolve(ret)
+            } catch (e: Exception) {
+                call.reject("翻译模型安装失败：${e.message}")
+            } finally {
+                installing = null
+                cancelRequested = false
+            }
+        }
+    }
+
+    /** 取消当前安装。下载中立即生效；解压中在下一个读块生效。 */
+    @PluginMethod
+    fun cancelDownload(call: PluginCall) {
+        cancelRequested = true
+        val ret = JSObject()
+        ret.put("ok", true)
+        call.resolve(ret)
+    }
+
+    private fun install(direction: String, givenRoot: String?): JSObject {
+        val ret = JSObject()
+        ret.put("direction", direction)
+        val root = writableRoot(givenRoot)
+        val target = File(root, "mt-$direction")
+
+        // 已经装好就不要再下 148 MB：内部（旧 adb 布局）与外部都算装好。
+        if (MtEngine.isInstalled(target)) return installedResult(ret, target, verified = true)
+        resolveDirectionDir(root.absolutePath, direction)?.let { existing ->
+            return installedResult(ret, existing, verified = true)
+        }
+
+        val work = File(root, ".mt-install")
+        if (!work.isDirectory && !work.mkdirs()) throw IllegalStateException("无法创建临时目录")
+        val zipName = "mt-$direction-int8.zip"
+        val url = RELEASE_BASE + zipName
+        val zip = File(work, zipName)
+        val staging = File(work, "$direction.part")
+
+        try {
+            staging.deleteRecursively()
+            zip.delete()
+
+            notifyMt(direction, "resolve")
+            val total = headContentLength(url)
+            // 需要同时装下 zip（154 MB）与解压结果（237 MB）≈ 2.7 倍；总量未知时按 520 MB 估。
+            val needed = if (total > 0) (total * 2.7).toLong() else 520L * 1024 * 1024
+            val usable = root.usableSpace
+            if (usable in 1 until needed) {
+                throw IllegalStateException(
+                    "存储空间不足：需要约 ${mb(needed)} MB，可用 ${mb(usable)} MB"
+                )
+            }
+
+            notifyMt(direction, "download", 0, total)
+            download(url, zip, total, direction)
+
+            notifyMt(direction, "verify")
+            val verified = verifyChecksum(zip, "$url.sha256")
+
+            notifyMt(direction, "unzip")
+            MtArchive.extract(
+                zip,
+                staging,
+                onEntry = { entries, bytes -> notifyMt(direction, "unzip", entries = entries, bytes = bytes) },
+                cancelled = { cancelRequested },
+            )
+
+            val src = MtArchive.findModelDir(staging, direction)
+                ?: throw IllegalStateException("模型包内容不完整（找不到 ${MtArchive.MODEL_FILES.first()}）")
+            if (!MtEngine.isInstalled(src)) {
+                throw IllegalStateException("解压结果未通过完整性检查")
+            }
+            if (target.exists() && !target.deleteRecursively()) {
+                throw IllegalStateException("无法替换旧模型目录 ${target.absolutePath}")
+            }
+            if (!src.renameTo(target)) {
+                if (!src.copyRecursively(target, overwrite = true)) {
+                    throw IllegalStateException("无法写入 ${target.absolutePath}")
+                }
+                src.deleteRecursively()
+            }
+
+            notifyMt(direction, "done")
+            return installedResult(ret, target, verified)
+        } finally {
+            staging.deleteRecursively()
+            zip.delete()
+            // 临时目录空了就顺手删掉，别在用户存储里留空壳。
+            if (work.listFiles()?.isEmpty() == true) work.delete()
+        }
+    }
+
+    private fun installedResult(ret: JSObject, dir: File, verified: Boolean): JSObject {
+        ret.put("ok", true)
+        ret.put("installed", true)
+        ret.put("bytes", dirBytes(dir))
+        ret.put("verified", verified)
+        ret.put("path", dir.absolutePath)
+        return ret
+    }
+
+    /**
+     * 下载 zip 到 [target]（先写 `.part`，校验长度后改名）。
+     * 进度每 300 ms 上报一次——再密只是白烧桥接带宽。
+     */
+    private fun download(url: String, target: File, total: Long, direction: String) {
+        val conn = URL(url).openConnection() as HttpURLConnection
+        conn.connectTimeout = 15000
+        conn.readTimeout = 60000
+        conn.instanceFollowRedirects = true
+        conn.setRequestProperty("User-Agent", UA)
+        try {
+            val code = conn.responseCode
+            if (code != 200) {
+                throw IllegalStateException("HTTP $code（该版本可能没有附带模型包）")
+            }
+            // HEAD 拿不到时用 GET 自己的 Content-Length 兜底。
+            val expected = if (total > 0) total else conn.contentLengthLong
+            val part = File(target.parentFile, target.name + ".part")
+            var received = 0L
+            var lastNotify = 0L
+            FileOutputStream(part).use { out ->
+                conn.inputStream.use { input ->
+                    val buf = ByteArray(256 * 1024)
+                    while (true) {
+                        if (cancelRequested) throw InstallCancelled()
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        out.write(buf, 0, n)
+                        received += n
+                        val now = System.currentTimeMillis()
+                        if (now - lastNotify > 300) {
+                            lastNotify = now
+                            notifyMt(direction, "download", received, expected)
+                        }
+                    }
+                }
+            }
+            if (expected > 0 && received != expected) {
+                part.delete()
+                throw IllegalStateException("下载不完整：$received / $expected 字节")
+            }
+            if (!part.renameTo(target)) throw IllegalStateException("无法保存到 ${target.absolutePath}")
+            notifyMt(direction, "download", received, maxOf(expected, received))
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    /**
+     * 用 Release 里同名的 `.sha256` 校验整包。
+     *
+     * 拿不到摘要（老版本没挂这个资产）时**不拦下载**——HTTPS + zip 结构 + 长度
+     * 已经挡住绝大多数问题；但会把 `verified=false` 如实报给界面，不假装校验过。
+     */
+    private fun verifyChecksum(zip: File, shaUrl: String): Boolean {
+        val expected = try {
+            MtArchive.parseSha256(fetchText(shaUrl))
+        } catch (e: Exception) {
+            null
+        } ?: return false
+        val actual = MtArchive.sha256(zip)
+        if (!actual.equals(expected, ignoreCase = true)) {
+            throw IllegalStateException("模型包校验失败（下载可能被截断，请重试）")
+        }
+        return true
+    }
+
+    private fun fetchText(url: String): String {
+        val conn = URL(url).openConnection() as HttpURLConnection
+        conn.connectTimeout = 15000
+        conn.readTimeout = 30000
+        conn.instanceFollowRedirects = true
+        conn.setRequestProperty("User-Agent", UA)
+        try {
+            if (conn.responseCode != 200) throw IllegalStateException("HTTP ${conn.responseCode}")
+            return conn.inputStream.bufferedReader().use { it.readText() }.take(4096)
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    /** HEAD 拿 Content-Length（跟随重定向）；失败返回 -1。 */
+    private fun headContentLength(url: String): Long {
+        return try {
+            val conn = URL(url).openConnection() as HttpURLConnection
+            conn.connectTimeout = 15000
+            conn.readTimeout = 30000
+            conn.requestMethod = "HEAD"
+            conn.instanceFollowRedirects = true
+            conn.setRequestProperty("User-Agent", UA)
+            val len = if (conn.responseCode == 200) conn.contentLengthLong else -1L
+            conn.disconnect()
+            len
+        } catch (e: Exception) {
+            -1L
+        }
+    }
+
+    private fun notifyMt(
+        direction: String,
+        phase: String,
+        received: Long = 0,
+        total: Long = 0,
+        entries: Int = 0,
+        bytes: Long = 0,
+    ) {
+        val data = JSObject()
+        data.put("direction", direction)
+        data.put("phase", phase)
+        if (total > 0) {
+            data.put("received", received)
+            data.put("total", total)
+        } else if (received > 0) {
+            data.put("received", received)
+        }
+        if (entries > 0) {
+            data.put("entries", entries)
+            data.put("bytes", bytes)
+        }
+        notifyListeners("mtProgress", data)
+    }
+
+    /**
+     * 写入位置：外部应用目录优先（`Android/data/.../files/models`），
+     * 拿不到外部目录才退回内部。与 [resolveDirectionDir] 的读取顺序不同是
+     * 有意的——读要兼容历史安装，写要选用户能自己清理的位置。
+     */
+    private fun writableRoot(given: String?): File {
+        val dir = if (!given.isNullOrBlank()) {
+            File(dirOf(given))
+        } else {
+            context.getExternalFilesDir(null)?.let { File(it, "models") }
+                ?: File(context.filesDir, "models")
+        }
+        if (!dir.isDirectory && !dir.mkdirs()) {
+            throw IllegalStateException("无法创建模型目录 ${dir.absolutePath}")
+        }
+        return dir
+    }
+
+    private fun dirBytes(dir: File): Long =
+        dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+
+    private fun mb(bytes: Long): Long = (bytes + 1024 * 1024 - 1) / (1024 * 1024)
+
     override fun handleOnDestroy() {
         engines.values.forEach { it.close() }
         engines.clear()
         worker.shutdownNow()
+        installer.shutdownNow()
         super.handleOnDestroy()
     }
 
@@ -153,6 +463,17 @@ class SherpaMTPlugin : Plugin() {
     private companion object {
         /** 目标语种 → 方向目录名。模型目录是 mt-<源>-<目标>。 */
         val DIRECTION_BY_TARGET = mapOf("en" to "zh-en", "zh" to "en-zh")
+
+        /** 方向目录名 → 目标语种（状态上报用，与上面互为反查）。 */
+        val TARGET_BY_DIRECTION = mapOf("zh-en" to "en", "en-zh" to "zh")
+
+        /**
+         * 模型包地址。用 `latest` 而不是写死版本号：模型重导后只要挂到最新
+         * Release 的同名资产上，旧安装就还能下到对的文件；反过来，**每次发版
+         * 必须继续挂这两个 zip**，否则老用户的应用内下载会 404。
+         */
+        const val RELEASE_BASE = "https://github.com/Qsianuo/echonote/releases/latest/download/"
+        const val UA = "EchoNote-Android/1.0"
     }
 }
 

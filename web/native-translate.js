@@ -53,4 +53,82 @@ export const mt = {
       return '';
     }
   },
+
+  /** 插件在不在（决定设置页要不要显示「离线翻译模型」这一块）。 */
+  supported() {
+    const plugin = bridge();
+    return !!plugin && typeof plugin.modelStatus === 'function';
+  },
+
+  /**
+   * 两个方向的安装状态：``{ items: [{direction, target, installed, bytes, path}],
+   * freeBytes, installing }``。插件缺席时 ``supported:false``，界面整块隐藏。
+   */
+  async status() {
+    const plugin = bridge();
+    if (!plugin || typeof plugin.modelStatus !== 'function') {
+      return { items: [], freeBytes: 0, installing: '', supported: false };
+    }
+    try {
+      const res = await plugin.modelStatus();
+      const items = Array.isArray(res && res.items) ? res.items : [];
+      return {
+        items,
+        freeBytes: Number((res && res.freeBytes) || 0),
+        installing: String((res && res.installing) || ''),
+        supported: true,
+      };
+    } catch (error) {
+      console.warn('[native-translate] 读取模型状态失败:', error);
+      return { items: [], freeBytes: 0, installing: '', supported: false };
+    }
+  },
+
+  /**
+   * 下载并安装一个方向（"zh-en" / "en-zh"）。返回安装结果；用户取消时
+   * ``{ ok:false, cancelled:true }``，失败时抛出带原因的异常。
+   */
+  async download(direction) {
+    const plugin = bridge();
+    if (!plugin || typeof plugin.downloadModel !== 'function') {
+      throw new Error('当前环境不支持下载翻译模型');
+    }
+    return plugin.downloadModel({ direction });
+  },
+
+  /** 取消下载。插件缺席时是空操作。 */
+  async cancel() {
+    const plugin = bridge();
+    if (!plugin || typeof plugin.cancelDownload !== 'function') return;
+    try {
+      await plugin.cancelDownload();
+    } catch (error) {
+      console.warn('[native-translate] 取消失败:', error);
+    }
+  },
+
+  /**
+   * 订阅安装进度，返回取消订阅函数。事件形状：
+   * ``{direction, phase, received?, total?, entries?, bytes?}``，
+   * phase ∈ resolve / download / verify / unzip / done。
+   */
+  onProgress(handler) {
+    const plugin = bridge();
+    if (!plugin || typeof plugin.addListener !== 'function' || typeof handler !== 'function') {
+      return () => {};
+    }
+    // Capacitor 7 的 addListener 既能当 handle 用、也能 await，两种都兼容。
+    const handle = plugin.addListener('mtProgress', (data) => {
+      try {
+        handler(data || {});
+      } catch (error) {
+        console.warn('[native-translate] 进度回调异常:', error);
+      }
+    });
+    return () => {
+      Promise.resolve(handle)
+        .then((h) => h && typeof h.remove === 'function' && h.remove())
+        .catch(() => {});
+    };
+  },
 };
